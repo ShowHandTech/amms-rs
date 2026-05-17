@@ -1,0 +1,23 @@
+# PancakeSwap V4 (Infinity CLAMM) on BSC mainnet.
+# Usage: cargo run --release --example discover_pcs_v4 -- examples/configs/bsc-pcs-v4-cl.toml
+
+# JSON-RPC endpoint. Public nodes work for smoke tests but rate-limit hard on
+# eth_getLogs across long block ranges; use a paid endpoint (Ankr Premium /
+# Alchemy BSC / QuickNode) for real discovery.
+rpc = "https://bsc-rpc.publicnode.com"
+
+# Optional WebSocket endpoint, required only for StateSpaceManager::subscribe().
+# rpc_ws = "wss://bsc-rpc.publicnode.com"
+
+[pancake_v4_cl]
+# PCS Infinity CLPoolManager on BSC mainnet (deployed 2025-03-06).
+# Source: https://bscscan.com/address/0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b
+cl_pool_manager = "0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b"
+creation_block = 47214308
+
+# Hook filter for pool discovery:
+#   "none"  — only standard pools (hooks == 0x0). Default and safest.
+#   "all"   — include hooked pools (dynamic fees / custom curves will misprice
+#             in simulate_swap; debug only).
+#   "0xAaa...,0xBbb..." — comma-separated whitelist; 0x0 is always allowed.
+hook_filter = "none"

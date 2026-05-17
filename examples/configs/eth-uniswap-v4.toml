@@ -1,0 +1,16 @@
+# Uniswap V4 on Ethereum mainnet.
+# Usage: cargo run --release --example discover_pcs_v4 -- examples/configs/eth-uniswap-v4.toml
+#
+# NOTE: discover_pcs_v4 is hardwired to PancakeV4CLFactory; for UniswapV4
+# discovery you need an equivalent discover_uniswap_v4 example. This config
+# is here only as a reference for the addresses.
+
+rpc = "https://eth.llamarpc.com"
+# rpc_ws = "wss://..."
+
+[uniswap_v4]
+# Uniswap V4 PoolManager on Ethereum mainnet.
+# Source: https://etherscan.io/address/0x000000000004444c5dc75cb358380d2e3de08a90
+pool_manager = "0x000000000004444c5dc75cB358380D2e3dE08A90"
+creation_block = 21688329
+hook_filter = "none"
