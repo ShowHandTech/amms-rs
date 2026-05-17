@@ -18,5 +18,7 @@
 | --------------- | ------ |
 | UniswapV2 | ✅     |
 | UniswapV3 | ✅     |
+| UniswapV4 | ✅     |
+| PancakeSwapV4 (CL) | ✅     |
 | Balancer  | ✅     |
 | ERC4626 Vaults | ✅     |

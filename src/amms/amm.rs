@@ -1,6 +1,7 @@
 use super::{
-    balancer::BalancerPool, erc_4626::ERC4626Vault, error::AMMError, uniswap_v2::UniswapV2Pool,
-    uniswap_v3::UniswapV3Pool,
+    balancer::BalancerPool, erc_4626::ERC4626Vault, error::AMMError,
+    pancake_v4_cl::PancakeV4CLPool, uniswap_v2::UniswapV2Pool, uniswap_v3::UniswapV3Pool,
+    uniswap_v4::UniswapV4Pool,
 };
 use alloy::{
     eips::BlockId,
@@ -13,10 +14,38 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
+/// Stable identity for an AMM instance.
+///
+/// Pre-V4 pools each have their own contract address; V4-family pools live inside a singleton
+/// (Uniswap V4 `PoolManager`, PCS Infinity `CLPoolManager`) and are keyed by `PoolId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AmmId {
+    Address(Address),
+    V4 { singleton: Address, pool_id: B256 },
+}
+
+impl AmmId {
+    /// Returns the contract address if this AMM owns one (V2/V3/Balancer/ERC4626).
+    /// V4 pools return `None` because they share a singleton.
+    pub fn as_address(&self) -> Option<Address> {
+        match self {
+            AmmId::Address(a) => Some(*a),
+            AmmId::V4 { .. } => None,
+        }
+    }
+}
+
+impl From<Address> for AmmId {
+    fn from(a: Address) -> Self {
+        AmmId::Address(a)
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait AutomatedMarketMaker {
-    /// Address of the AMM
-    fn address(&self) -> Address;
+    /// Stable identity for this AMM. Replaces the old `address()` method since V4 pools have no
+    /// dedicated contract address.
+    fn id(&self) -> AmmId;
 
     /// Event signatures that indicate when the AMM should be synced
     fn sync_events(&self) -> Vec<B256>;
@@ -64,9 +93,9 @@ macro_rules! amm {
         }
 
         impl AutomatedMarketMaker for AMM {
-            fn address(&self) -> Address{
+            fn id(&self) -> AmmId {
                 match self {
-                    $(AMM::$pool_type(pool) => pool.address(),)+
+                    $(AMM::$pool_type(pool) => pool.id(),)+
                 }
             }
 
@@ -134,13 +163,13 @@ macro_rules! amm {
 
         impl Hash for AMM {
             fn hash<H: Hasher>(&self, state: &mut H) {
-                self.address().hash(state);
+                self.id().hash(state);
             }
         }
 
         impl PartialEq for AMM {
             fn eq(&self, other: &Self) -> bool {
-                self.address() == other.address()
+                self.id() == other.id()
             }
         }
 
@@ -156,4 +185,11 @@ macro_rules! amm {
     };
 }
 
-amm!(UniswapV2Pool, UniswapV3Pool, ERC4626Vault, BalancerPool);
+amm!(
+    UniswapV2Pool,
+    UniswapV3Pool,
+    ERC4626Vault,
+    BalancerPool,
+    UniswapV4Pool,
+    PancakeV4CLPool,
+);

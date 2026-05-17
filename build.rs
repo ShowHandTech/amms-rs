@@ -19,6 +19,12 @@ const TARGET_CONTRACTS: &[&str] = &[
     "GetUniswapV3PoolSlot0BatchRequest",
     "GetUniswapV3PoolTickBitmapBatchRequest",
     "GetUniswapV3PoolTickDataBatchRequest",
+    "GetUniswapV4PoolSlot0BatchRequest",
+    "GetUniswapV4PoolTickBitmapBatchRequest",
+    "GetUniswapV4PoolTickDataBatchRequest",
+    "GetPancakeV4CLPoolSlot0BatchRequest",
+    "GetPancakeV4CLPoolTickBitmapBatchRequest",
+    "GetPancakeV4CLPoolTickDataBatchRequest",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

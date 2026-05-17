@@ -1,5 +1,5 @@
 use super::{
-    amm::AutomatedMarketMaker,
+    amm::{AmmId, AutomatedMarketMaker},
     consts::{U128_0X10000000000000000, U256_10000, U256_2},
     error::AMMError,
     float::q64_to_float,
@@ -67,8 +67,8 @@ pub struct ERC4626Vault {
 }
 
 impl AutomatedMarketMaker for ERC4626Vault {
-    fn address(&self) -> Address {
-        self.vault_token
+    fn id(&self) -> AmmId {
+        AmmId::Address(self.vault_token)
     }
 
     fn sync_events(&self) -> Vec<B256> {

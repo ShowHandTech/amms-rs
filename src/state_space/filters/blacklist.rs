@@ -27,8 +27,11 @@ impl AMMFilter for BlacklistFilter {
         Ok(amms
             .into_iter()
             .filter(|amm| {
-                !self.blacklist.contains(&amm.address())
-                    && amm.tokens().iter().all(|t| !self.blacklist.contains(t))
+                let addr_blacklisted = amm
+                    .id()
+                    .as_address()
+                    .is_some_and(|a| self.blacklist.contains(&a));
+                !addr_blacklisted && amm.tokens().iter().all(|t| !self.blacklist.contains(t))
             })
             .collect())
     }

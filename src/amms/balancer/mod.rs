@@ -20,7 +20,7 @@ use thiserror::Error;
 use tracing::info;
 
 use super::{
-    amm::{AutomatedMarketMaker, AMM},
+    amm::{AmmId, AutomatedMarketMaker, AMM},
     consts::{BONE, MPFR_T_PRECISION},
     error::AMMError,
     factory::{AutomatedMarketMakerFactory, DiscoverySync},
@@ -119,9 +119,8 @@ pub struct TokenPoolState {
 }
 
 impl AutomatedMarketMaker for BalancerPool {
-    /// Returns the address of the AMM.
-    fn address(&self) -> Address {
-        self.address
+    fn id(&self) -> AmmId {
+        AmmId::Address(self.address)
     }
 
     fn sync_events(&self) -> Vec<B256> {
@@ -359,6 +358,10 @@ impl BalancerPool {
             ..Default::default()
         }
     }
+
+    pub fn address(&self) -> Address {
+        self.address
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
@@ -500,7 +503,15 @@ impl BalancerFactory {
             .iter()
             .chunks(step)
             .into_iter()
-            .map(|chunk| chunk.map(|amm| amm.address()).collect())
+            .map(|chunk| {
+                chunk
+                    .map(|amm| {
+                        amm.id()
+                            .as_address()
+                            .expect("BalancerPool must have an address")
+                    })
+                    .collect()
+            })
             .collect::<Vec<Vec<Address>>>();
 
         let mut futures_unordered = FuturesUnordered::new();
@@ -524,7 +535,14 @@ impl BalancerFactory {
 
         let mut amms = amms
             .into_iter()
-            .map(|amm| (amm.address(), amm))
+            .map(|amm| {
+                (
+                    amm.id()
+                        .as_address()
+                        .expect("BalancerPool must have an address"),
+                    amm,
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         while let Some(res) = futures_unordered.next().await {

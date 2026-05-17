@@ -1,6 +1,9 @@
-use super::{amm::Variant, uniswap_v2::UniswapV2Factory, uniswap_v3::UniswapV3Factory};
 use super::{
-    amm::{AutomatedMarketMaker, AMM},
+    amm::Variant, pancake_v4_cl::PancakeV4CLFactory, uniswap_v2::UniswapV2Factory,
+    uniswap_v3::UniswapV3Factory, uniswap_v4::UniswapV4Factory,
+};
+use super::{
+    amm::{AmmId, AutomatedMarketMaker, AMM},
     balancer::BalancerFactory,
     error::AMMError,
 };
@@ -156,12 +159,18 @@ macro_rules! factory {
     };
 }
 
-factory!(UniswapV2Factory, UniswapV3Factory, BalancerFactory);
+factory!(
+    UniswapV2Factory,
+    UniswapV3Factory,
+    BalancerFactory,
+    UniswapV4Factory,
+    PancakeV4CLFactory,
+);
 
 #[derive(Default)]
 pub struct NoopAMM;
 impl AutomatedMarketMaker for NoopAMM {
-    fn address(&self) -> Address {
+    fn id(&self) -> AmmId {
         unreachable!()
     }
 

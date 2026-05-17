@@ -89,13 +89,23 @@ where
             .iter()
             .cloned()
             .map(|amm| {
-                let pool_address = amm.address();
+                let pool_address = amm
+                    .id()
+                    .as_address()
+                    .expect("ValueFilter does not support V4 pools");
                 let pool_type = match amm {
                     AMM::BalancerPool(_) => 0,
                     AMM::UniswapV2Pool(_) => 1,
                     AMM::UniswapV3Pool(_) => 2,
                     // TODO: At the moment, filters are not compatible with vaults
                     AMM::ERC4626Vault(_) => todo!(),
+                    // V4 pools have no per-pool address — the WethValueInPools batch contract
+                    // can't price them against the V2/V3 reference pools. Skip via factory-level
+                    // hook filtering instead.
+                    AMM::UniswapV4Pool(_) => todo!("V4 pool valuation not supported"),
+                    AMM::PancakeV4CLPool(_) => {
+                        todo!("PCS V4 CL pool valuation not supported")
+                    }
                 };
 
                 PoolInfo {
@@ -119,12 +129,13 @@ where
         let filtered_amms = amms
             .into_iter()
             .filter(|amm| {
-                let pool_address = amm.address();
-                pool_info_returns
-                    .get(&pool_address)
-                    .is_some_and(|pool_info_return| {
-                        pool_info_return.wethValue > self.min_weth_threshold
-                    })
+                amm.id().as_address().is_some_and(|pool_address| {
+                    pool_info_returns
+                        .get(&pool_address)
+                        .is_some_and(|pool_info_return| {
+                            pool_info_return.wethValue > self.min_weth_threshold
+                        })
+                })
             })
             .collect::<Vec<_>>();
         Ok(filtered_amms)

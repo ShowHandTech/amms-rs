@@ -1,5 +1,5 @@
 use super::{
-    amm::{AutomatedMarketMaker, AMM},
+    amm::{AmmId, AutomatedMarketMaker, AMM},
     consts::{
         MPFR_T_PRECISION, U128_0X10000000000000000, U256_0X100, U256_0X10000, U256_0X100000000,
         U256_0XFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
@@ -86,8 +86,8 @@ pub struct UniswapV2Pool {
 }
 
 impl AutomatedMarketMaker for UniswapV2Pool {
-    fn address(&self) -> Address {
-        self.address
+    fn id(&self) -> AmmId {
+        AmmId::Address(self.address)
     }
 
     fn sync_events(&self) -> Vec<B256> {
@@ -181,7 +181,7 @@ impl AutomatedMarketMaker for UniswapV2Pool {
     {
         let deployer = IGetUniswapV2PoolDataBatchRequestInstance::deploy_builder(
             provider.clone(),
-            vec![self.address()],
+            vec![self.address],
         );
 
         let res = deployer.call_raw().block(block_number).await?;
@@ -445,7 +445,15 @@ impl UniswapV2Factory {
             .iter()
             .chunks(step)
             .into_iter()
-            .map(|chunk| chunk.map(|amm| amm.address()).collect())
+            .map(|chunk| {
+                chunk
+                    .map(|amm| {
+                        amm.id()
+                            .as_address()
+                            .expect("UniswapV2Pool must have an address")
+                    })
+                    .collect()
+            })
             .collect::<Vec<Vec<Address>>>();
 
         let mut futures_unordered = FuturesUnordered::new();
@@ -470,7 +478,14 @@ impl UniswapV2Factory {
 
         let mut amms = amms
             .into_iter()
-            .map(|amm| (amm.address(), amm))
+            .map(|amm| {
+                (
+                    amm.id()
+                        .as_address()
+                        .expect("UniswapV2Pool must have an address"),
+                    amm,
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         while let Some(res) = futures_unordered.next().await {

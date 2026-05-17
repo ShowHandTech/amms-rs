@@ -76,7 +76,7 @@ impl<const CAP: usize> StateChangeCache<CAP> {
             .rev()
             .fold(HashMap::new(), |mut amms, state_change| {
                 for amm in state_change.state_change {
-                    amms.entry(amm.address()).or_insert(amm);
+                    amms.entry(amm.id()).or_insert(amm);
                 }
                 amms
             })

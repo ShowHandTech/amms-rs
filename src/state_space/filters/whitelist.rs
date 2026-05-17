@@ -25,7 +25,11 @@ impl AMMFilter for PoolWhitelistFilter {
     async fn filter(&self, amms: Vec<AMM>) -> Result<Vec<AMM>, AMMError> {
         Ok(amms
             .into_iter()
-            .filter(|amm| self.pools.contains(&amm.address()))
+            .filter(|amm| {
+                amm.id()
+                    .as_address()
+                    .is_some_and(|a| self.pools.contains(&a))
+            })
             .collect())
     }
 

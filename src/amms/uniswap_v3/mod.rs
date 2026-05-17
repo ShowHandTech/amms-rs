@@ -1,5 +1,5 @@
 use super::{
-    amm::{AutomatedMarketMaker, AMM},
+    amm::{AmmId, AutomatedMarketMaker, AMM},
     error::{AMMError, BatchContractError},
     factory::{AutomatedMarketMakerFactory, DiscoverySync},
     get_token_decimals, Token,
@@ -186,8 +186,8 @@ pub struct Tick {
 }
 
 impl AutomatedMarketMaker for UniswapV3Pool {
-    fn address(&self) -> Address {
-        self.address
+    fn id(&self) -> AmmId {
+        AmmId::Address(self.address)
     }
 
     fn sync_events(&self) -> Vec<B256> {
@@ -881,7 +881,11 @@ impl UniswapV3Factory {
             let provider = provider.clone();
             let pool_addresses = group
                 .iter_mut()
-                .map(|pool| pool.address())
+                .map(|pool| {
+                    pool.id()
+                        .as_address()
+                        .expect("UniswapV3Pool must have an address")
+                })
                 .collect::<Vec<_>>();
 
             futures.push(async move {
@@ -996,7 +1000,14 @@ impl UniswapV3Factory {
 
         let mut pool_set = pools
             .iter_mut()
-            .map(|pool| (pool.address(), pool))
+            .map(|pool| {
+                (
+                    pool.id()
+                        .as_address()
+                        .expect("UniswapV3Pool must have an address"),
+                    pool,
+                )
+            })
             .collect::<HashMap<Address, &mut AMM>>();
 
         while let Some(res) = futures.next().await {
@@ -1130,7 +1141,14 @@ impl UniswapV3Factory {
 
         let mut pool_set = pools
             .iter_mut()
-            .map(|pool| (pool.address(), pool))
+            .map(|pool| {
+                (
+                    pool.id()
+                        .as_address()
+                        .expect("UniswapV3Pool must have an address"),
+                    pool,
+                )
+            })
             .collect::<HashMap<Address, &mut AMM>>();
 
         while let Some(res) = futures.next().await {

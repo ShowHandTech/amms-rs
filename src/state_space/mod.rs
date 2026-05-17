@@ -3,6 +3,7 @@ pub mod discovery;
 pub mod error;
 pub mod filters;
 
+use crate::amms::amm::AmmId;
 use crate::amms::amm::AutomatedMarketMaker;
 use crate::amms::amm::AMM;
 use crate::amms::error::AMMError;
@@ -13,7 +14,7 @@ use alloy::eips::BlockId;
 use alloy::rpc::types::{Block, Filter, FilterSet, Log};
 use alloy::{
     network::Network,
-    primitives::{Address, FixedBytes},
+    primitives::{Address, B256, FixedBytes},
     providers::Provider,
 };
 use async_stream::stream;
@@ -52,7 +53,7 @@ impl<N, P> StateSpaceManager<N, P> {
     pub async fn subscribe(
         &self,
     ) -> Result<
-        Pin<Box<dyn Stream<Item = Result<Vec<Address>, StateSpaceError>> + Send>>,
+        Pin<Box<dyn Stream<Item = Result<Vec<AmmId>, StateSpaceError>> + Send>>,
         StateSpaceError,
     >
     where
@@ -219,16 +220,29 @@ where
             let synced_amms = res??;
 
             for amm in synced_amms {
-                state_space.state.insert(amm.address(), amm);
+                state_space.state.insert(amm.id(), amm);
             }
         }
 
         // Sync remaining AMM variants
         for (_, remaining_amms) in amm_variants.drain() {
             for mut amm in remaining_amms {
-                let address = amm.address();
                 amm = amm.init(chain_tip, self.provider.clone()).await?;
-                state_space.state.insert(address, amm);
+                state_space.state.insert(amm.id(), amm);
+            }
+        }
+
+        // Collect singleton addresses for V4-family pools. All V4 logs route through these,
+        // so `StateSpace::route_log` uses this set to decide whether to key by `log.address()`
+        // or by `(singleton, topics[1])`.
+        //
+        // Note: we do NOT add `.address(singletons)` to `block_filter`. The address field of
+        // `alloy::Filter` ANDs with `event_signature`, which would silently drop every V2/V3
+        // log if any V4 singleton were registered. V4 events are pulled globally by signature
+        // and second-filtered against `state` in `StateSpace::sync`, matching the V2/V3 path.
+        for amm_id in state_space.state.keys() {
+            if let AmmId::V4 { singleton, .. } = amm_id {
+                state_space.singletons.insert(*singleton);
             }
         }
 
@@ -244,21 +258,40 @@ where
 
 #[derive(Debug, Default)]
 pub struct StateSpace {
-    pub state: HashMap<Address, AMM>,
+    pub state: HashMap<AmmId, AMM>,
+    /// Addresses of V4-family singleton contracts (Uniswap V4 `PoolManager`,
+    /// PancakeSwap Infinity `CLPoolManager`). Logs from these addresses are routed by
+    /// `topics[1]` (PoolId) instead of `log.address()`.
+    pub singletons: HashSet<Address>,
     pub latest_block: Arc<AtomicU64>,
     cache: StateChangeCache<CACHE_SIZE>,
 }
 
 impl StateSpace {
-    pub fn get(&self, address: &Address) -> Option<&AMM> {
-        self.state.get(address)
+    pub fn get(&self, id: &AmmId) -> Option<&AMM> {
+        self.state.get(id)
     }
 
-    pub fn get_mut(&mut self, address: &Address) -> Option<&mut AMM> {
-        self.state.get_mut(address)
+    pub fn get_mut(&mut self, id: &AmmId) -> Option<&mut AMM> {
+        self.state.get_mut(id)
     }
 
-    pub fn sync(&mut self, logs: &[Log]) -> Result<Vec<Address>, StateSpaceError> {
+    /// Resolve a sync log to the AmmId of the pool it targets. V4 logs are routed by `topics[1]`
+    /// (PoolId) under a known singleton; everything else routes by `log.address()`.
+    fn route_log(&self, log: &Log) -> Option<AmmId> {
+        let log_address = log.address();
+        if self.singletons.contains(&log_address) {
+            let pool_id = B256::from(log.topics().get(1).copied()?);
+            Some(AmmId::V4 {
+                singleton: log_address,
+                pool_id,
+            })
+        } else {
+            Some(AmmId::Address(log_address))
+        }
+    }
+
+    pub fn sync(&mut self, logs: &[Log]) -> Result<Vec<AmmId>, StateSpaceError> {
         let latest = self.latest_block.load(Ordering::Relaxed);
         let Some(mut block_number) = logs
             .first()
@@ -280,7 +313,7 @@ impl StateSpace {
             let cached_state = self.cache.unwind_state_changes(block_number);
             for amm in cached_state {
                 debug!(target: "state_space::sync", ?amm, "Reverting AMM state");
-                self.state.insert(amm.address(), amm);
+                self.state.insert(amm.id(), amm);
             }
         }
 
@@ -293,7 +326,7 @@ impl StateSpace {
                 .ok_or(StateSpaceError::MissingBlockNumber)?;
             if log_block_number != block_number {
                 let amms = cached_amms.drain().collect::<Vec<AMM>>();
-                affected_amms.extend(amms.iter().map(|amm| amm.address()));
+                affected_amms.extend(amms.iter().map(|amm| amm.id()));
                 let state_change = StateChange::new(amms, block_number);
 
                 debug!(
@@ -307,8 +340,10 @@ impl StateSpace {
             }
 
             // If the AMM is in the state space add the current state to cache and sync from log
-            let address = log.address();
-            if let Some(amm) = self.state.get_mut(&address) {
+            let Some(key) = self.route_log(log) else {
+                continue;
+            };
+            if let Some(amm) = self.state.get_mut(&key) {
                 cached_amms.insert(amm.clone());
                 amm.sync(log)?;
 
@@ -322,7 +357,7 @@ impl StateSpace {
 
         if !cached_amms.is_empty() {
             let amms = cached_amms.drain().collect::<Vec<AMM>>();
-            affected_amms.extend(amms.iter().map(|amm| amm.address()));
+            affected_amms.extend(amms.iter().map(|amm| amm.id()));
             let state_change = StateChange::new(amms, block_number);
 
             debug!(
