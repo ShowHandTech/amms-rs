@@ -1022,6 +1022,54 @@ impl AutomatedMarketMakerFactory for UniswapV4Factory {
     }
 }
 
+impl UniswapV4Factory {
+    /// Phase 6+: convert a `PoolDescriptor::UniswapV4` into an unsynced `UniswapV4Pool`. PoolKey
+    /// fields (currency0/1/fee/tickSpacing/hooks) must be supplied by the descriptor since the
+    /// Uniswap V4 `PoolManager` does not expose `poolIdToPoolKey()`.
+    pub fn from_descriptor(
+        &self,
+        desc: &crate::discovery::PoolDescriptor,
+    ) -> Result<AMM, AMMError> {
+        match desc {
+            crate::discovery::PoolDescriptor::UniswapV4 {
+                pool_id,
+                pool_manager,
+                currency0,
+                currency1,
+                fee,
+                tick_spacing,
+                hooks,
+            } => {
+                if *pool_manager != self.pool_manager {
+                    return Err(AMMError::DescriptorSingletonMismatch {
+                        got: *pool_manager,
+                        expected: self.pool_manager,
+                    });
+                }
+                Ok(AMM::UniswapV4Pool(UniswapV4Pool {
+                    pool_id: *pool_id,
+                    pool_manager: *pool_manager,
+                    currency0: *currency0,
+                    currency0_decimals: 0,
+                    currency1: *currency1,
+                    currency1_decimals: 0,
+                    hooks: *hooks,
+                    state: V4CLState {
+                        liquidity: 0,
+                        sqrt_price: U256::ZERO,
+                        tick: 0,
+                        fee: *fee,
+                        tick_spacing: *tick_spacing,
+                        tick_bitmap: HashMap::new(),
+                        ticks: HashMap::new(),
+                    },
+                }))
+            }
+            _ => Err(AMMError::IncompatibleDescriptor),
+        }
+    }
+}
+
 impl DiscoverySync for UniswapV4Factory {
     fn discover<N, P>(
         &self,

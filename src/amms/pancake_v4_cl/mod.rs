@@ -1014,6 +1014,62 @@ impl AutomatedMarketMakerFactory for PancakeV4CLFactory {
     }
 }
 
+impl PancakeV4CLFactory {
+    /// Phase 6+: convert a `PoolDescriptor::PcsV4Cl` into an unsynced `PancakeV4CLPool`. If
+    /// `currency0`/`currency1`/`hooks`/`parameters` are not supplied by the descriptor, the
+    /// resulting pool is partially initialized; a subsequent on-chain `poolIdToPoolKey()`
+    /// round-trip can backfill these fields. `tick_spacing` is decoded from `parameters` when
+    /// present, otherwise left at 0 for the sync stage to populate.
+    pub fn from_descriptor(
+        &self,
+        desc: &crate::discovery::PoolDescriptor,
+    ) -> Result<AMM, AMMError> {
+        match desc {
+            crate::discovery::PoolDescriptor::PcsV4Cl {
+                pool_id,
+                cl_pool_manager,
+                currency0,
+                currency1,
+                hooks,
+                parameters,
+            } => {
+                if *cl_pool_manager != self.cl_pool_manager {
+                    return Err(AMMError::DescriptorSingletonMismatch {
+                        got: *cl_pool_manager,
+                        expected: self.cl_pool_manager,
+                    });
+                }
+                let parameters = parameters.unwrap_or_default();
+                let tick_spacing = if parameters == B256::ZERO {
+                    0
+                } else {
+                    tick_spacing_from_parameters(parameters)
+                };
+                Ok(AMM::PancakeV4CLPool(PancakeV4CLPool {
+                    pool_id: *pool_id,
+                    cl_pool_manager: *cl_pool_manager,
+                    currency0: currency0.unwrap_or_default(),
+                    currency0_decimals: 0,
+                    currency1: currency1.unwrap_or_default(),
+                    currency1_decimals: 0,
+                    hooks: hooks.unwrap_or_default(),
+                    parameters,
+                    state: V4CLState {
+                        liquidity: 0,
+                        sqrt_price: U256::ZERO,
+                        tick: 0,
+                        fee: 0,
+                        tick_spacing,
+                        tick_bitmap: HashMap::new(),
+                        ticks: HashMap::new(),
+                    },
+                }))
+            }
+            _ => Err(AMMError::IncompatibleDescriptor),
+        }
+    }
+}
+
 impl DiscoverySync for PancakeV4CLFactory {
     fn discover<N, P>(
         &self,

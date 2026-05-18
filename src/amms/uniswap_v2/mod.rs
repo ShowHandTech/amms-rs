@@ -554,6 +554,34 @@ impl AutomatedMarketMakerFactory for UniswapV2Factory {
     }
 }
 
+impl UniswapV2Factory {
+    /// Phase 6+: convert a `PoolDescriptor::V2` into an unsynced `UniswapV2Pool`. Reserves are
+    /// left zero; the caller is expected to drive the pool through `sync()` afterwards.
+    pub fn from_descriptor(
+        &self,
+        desc: &crate::discovery::PoolDescriptor,
+    ) -> Result<AMM, AMMError> {
+        match desc {
+            crate::discovery::PoolDescriptor::V2 {
+                address, factory, fee,
+            } => {
+                if *factory != self.address {
+                    return Err(AMMError::DescriptorSingletonMismatch {
+                        got: *factory,
+                        expected: self.address,
+                    });
+                }
+                Ok(AMM::UniswapV2Pool(UniswapV2Pool {
+                    address: *address,
+                    fee: *fee,
+                    ..Default::default()
+                }))
+            }
+            _ => Err(AMMError::IncompatibleDescriptor),
+        }
+    }
+}
+
 impl DiscoverySync for UniswapV2Factory {
     fn discover<N, P>(
         &self,

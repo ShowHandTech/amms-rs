@@ -1,0 +1,67 @@
+# Token-first runner config for BSC. Drives `examples/token_first_runner.rs`.
+# This is the deployment mode for environments where the node only keeps a short
+# log retention window (BSC full nodes: ~3 days = ~570k blocks at 450ms blocks),
+# making the factory-first historical-Initialize scan infeasible. Instead an
+# external token service publishes TRACK/UNTRACK over Redis pub/sub and amms-rs
+# pulls per-token pool lists from DexTools.
+
+# JSON-RPC endpoint. Used for batch reads (Slot0 / TickBitmap / TickData) and
+# for the initial pool sync after DexTools returns a descriptor list.
+rpc = "https://bsc-rpc.publicnode.com"
+
+# WebSocket endpoint. Required: the runner subscribes to (Swap, ModifyLiquidity,
+# Initialize, Sync, ...) and routes logs into the StateSpace by AmmId.
+rpc_ws = "wss://bsc-rpc.publicnode.com"
+
+# DexTools chain slug (see https://docs.dextools.io/openapi/api-documentation).
+chain_slug = "bsc"
+
+[dextools]
+# DexTools API key — billed monthly. Used for /v2/token/{chain}/{addr}/pools.
+api_key = "REPLACE_ME"
+
+[redis]
+url = "redis://127.0.0.1:6379/"
+# Namespace prefix for all keys/channels. The token service must use the same
+# namespace, otherwise amms will not see TRACK / UNTRACK messages.
+#   tokens:{namespace}:active   — SET, snapshot of currently tracked tokens
+#   tokens:{namespace}:changes  — pub/sub, "TRACK 0x..." | "UNTRACK 0x..."
+#   pools:{namespace}:{token}   — HASH, amms's own cache for fast restart
+#   mirror:{namespace}:pool:*   — STRING, JSON snapshot of each AMM (Phase 9)
+#   mirror:{namespace}:updates  — pub/sub, "{\"id\":..., \"block\":N}"  (Phase 9)
+namespace = "bsc"
+
+# Core tokens — never untrackable. Even if the token service sends UNTRACK 0x...
+# for one of these, amms refuses and logs a warning. Use this for the small set
+# of base / quote tokens you always want in the order book.
+[core_tokens]
+addresses = [
+  "0x55d398326f99059fF775485246999027B3197955",  # USDT (BSC)
+  "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",  # USDC (BSC)
+  "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
+  "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",  # BUSD
+]
+
+# PancakeSwap V4 CL singleton on BSC. The runner registers this as a factory so
+# (a) Initialize-event auto-track works for any new V4 pool whose currency0 or
+# currency1 is already in our tracked-tokens set, and (b) DexTools descriptors
+# tagged `PcsV4Cl` can be turned into unsynced AMMs.
+[pancake_v4_cl]
+cl_pool_manager = "0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b"
+# creation_block isn't used in token-first mode (no historical scan) but the
+# factory struct still needs it. Use the actual deploy block so any code path
+# that does fall back to historical scan works correctly.
+creation_block = 47214308
+# "none" = drop hooked pools; "all" = include; "0xAaa...,0xBbb..." = whitelist.
+hook_filter = "none"
+
+# PancakeSwap V2 + V3 factories. Same fee semantics as upstream UniswapV2 /
+# UniswapV3, just different factory addresses.
+[pancake_v2]
+factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+creation_block = 6809737
+fee = 250  # 25 bps; (100000 - 250) / 100000 multiplier
+
+[pancake_v3]
+factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+creation_block = 26956207

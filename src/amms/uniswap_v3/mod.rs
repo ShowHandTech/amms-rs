@@ -1216,6 +1216,31 @@ impl AutomatedMarketMakerFactory for UniswapV3Factory {
     }
 }
 
+impl UniswapV3Factory {
+    /// Phase 6+: convert a `PoolDescriptor::V3` into an unsynced `UniswapV3Pool`. `fee` and
+    /// `tick_spacing` are filled at sync-time from on-chain slot0.
+    pub fn from_descriptor(
+        &self,
+        desc: &crate::discovery::PoolDescriptor,
+    ) -> Result<AMM, AMMError> {
+        match desc {
+            crate::discovery::PoolDescriptor::V3 { address, factory } => {
+                if *factory != self.address {
+                    return Err(AMMError::DescriptorSingletonMismatch {
+                        got: *factory,
+                        expected: self.address,
+                    });
+                }
+                Ok(AMM::UniswapV3Pool(UniswapV3Pool {
+                    address: *address,
+                    ..Default::default()
+                }))
+            }
+            _ => Err(AMMError::IncompatibleDescriptor),
+        }
+    }
+}
+
 impl DiscoverySync for UniswapV3Factory {
     fn discover<N, P>(
         &self,

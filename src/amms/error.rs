@@ -2,7 +2,10 @@ use super::{
     balancer::BalancerError, erc_4626::ERC4626VaultError, uniswap_v2::UniswapV2Error,
     uniswap_v3::UniswapV3Error,
 };
-use alloy::{primitives::FixedBytes, transports::TransportErrorKind};
+use alloy::{
+    primitives::{Address, FixedBytes},
+    transports::TransportErrorKind,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -31,6 +34,10 @@ pub enum AMMError {
     UnrecognizedEventSignature(FixedBytes<32>),
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
+    #[error("Pool descriptor variant does not match factory protocol")]
+    IncompatibleDescriptor,
+    #[error("Pool descriptor singleton {got} does not match factory {expected}")]
+    DescriptorSingletonMismatch { got: Address, expected: Address },
 }
 
 #[derive(Error, Debug)]

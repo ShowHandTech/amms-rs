@@ -7,6 +7,7 @@ use super::{
     balancer::BalancerFactory,
     error::AMMError,
 };
+use crate::discovery::PoolDescriptor;
 use alloy::{
     eips::BlockId,
     network::Network,
@@ -108,6 +109,15 @@ macro_rules! factory {
             pub fn variant(&self) -> Variant {
                 match self {
                     $(Factory::$factory_type(factory) => AMM::from(factory.pool_variant()).variant(),)+
+                }
+            }
+
+            /// Phase 6+: materialize an unsynced `AMM` from a `PoolDescriptor`. Each factory
+            /// only handles descriptors that match its own protocol; descriptors for other
+            /// protocols return `AMMError::IncompatibleDescriptor`.
+            pub fn from_descriptor(&self, desc: &PoolDescriptor) -> Result<AMM, AMMError> {
+                match self {
+                    $(Factory::$factory_type(factory) => factory.from_descriptor(desc),)+
                 }
             }
         }

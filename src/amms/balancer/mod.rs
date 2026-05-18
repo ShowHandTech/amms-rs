@@ -399,6 +399,17 @@ impl AutomatedMarketMakerFactory for BalancerFactory {
     }
 }
 
+impl BalancerFactory {
+    /// Phase 6+: Balancer is not on the token-first discovery path (no DexTools support
+    /// modelled here); any descriptor is incompatible.
+    pub fn from_descriptor(
+        &self,
+        _desc: &crate::discovery::PoolDescriptor,
+    ) -> Result<AMM, AMMError> {
+        Err(AMMError::IncompatibleDescriptor)
+    }
+}
+
 impl DiscoverySync for BalancerFactory {
     fn discover<N, P>(
         &self,
