@@ -108,20 +108,51 @@ pub trait TokenPoolIndex: Send + Sync {
 /// Translate descriptors into unsynced `AMM` instances by dispatching to the matching factory.
 /// `factories` is matched by `Factory::address()` for V2/V3 (factory address) or by the V4
 /// singleton address (encoded inside the factory) for V4-family.
-pub fn descriptors_to_amms(
-    descriptors: Vec<PoolDescriptor>,
-    factories: &[Factory],
-) -> Result<Vec<AMM>, DiscoveryError> {
+///
+/// Descriptors whose factory/singleton isn't in `factories` (e.g. a SushiSwap pool when only
+/// PancakeSwap is configured) are dropped with a debug log — DexTools returns every DEX the
+/// token trades on, so unknown-factory drops are expected, not an error. Same for
+/// `from_descriptor` failures (e.g. enrichment missed a PoolKey field): warn and skip rather
+/// than failing the whole batch.
+pub fn descriptors_to_amms(descriptors: Vec<PoolDescriptor>, factories: &[Factory]) -> Vec<AMM> {
     let mut out = Vec::with_capacity(descriptors.len());
+    let mut dropped_unknown_factory = 0usize;
+    let mut dropped_from_descriptor: Vec<(Address, AMMError)> = Vec::new();
     for desc in descriptors {
         let singleton_or_factory = desc.singleton_or_factory();
-        let factory = factories
+        let Some(factory) = factories
             .iter()
             .find(|f| f.address() == singleton_or_factory)
-            .ok_or(DiscoveryError::NoMatchingFactory(singleton_or_factory))?;
-        out.push(factory.from_descriptor(&desc)?);
+        else {
+            dropped_unknown_factory += 1;
+            tracing::debug!(
+                target: "discovery",
+                factory = %singleton_or_factory,
+                "no factory configured for descriptor — skipping pool"
+            );
+            continue;
+        };
+        match factory.from_descriptor(&desc) {
+            Ok(amm) => out.push(amm),
+            Err(e) => dropped_from_descriptor.push((singleton_or_factory, e)),
+        }
     }
-    Ok(out)
+    if dropped_unknown_factory > 0 {
+        tracing::info!(
+            target: "discovery",
+            count = dropped_unknown_factory,
+            "skipped pools from factories not in config"
+        );
+    }
+    for (factory, err) in &dropped_from_descriptor {
+        tracing::warn!(
+            target: "discovery",
+            %factory,
+            error = %err,
+            "from_descriptor failed — skipping pool"
+        );
+    }
+    out
 }
 
 /// Discover pools for a single token through `index`, materialize them via matching factories,
@@ -164,7 +195,7 @@ where
 {
     let mut descriptors = index.pools_for_token(chain, token).await?;
     enrich_uniswap_v4_via_subgraph(&mut descriptors, subgraph).await;
-    let unsynced = descriptors_to_amms(descriptors, factories)?;
+    let unsynced = descriptors_to_amms(descriptors, factories);
     // Group by factory address and sync per-factory (each factory only knows how to sync its own).
     let mut grouped: std::collections::HashMap<Address, Vec<AMM>> =
         std::collections::HashMap::new();
