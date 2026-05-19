@@ -39,6 +39,13 @@ const PAGE_SIZE: u32 = 50;
 // Trial tier limit is 1 req/s. Add a small buffer so clock skew between local Instant and the
 // server's bucket counter doesn't make us bounce off 429s. Override via `with_min_interval`.
 const DEFAULT_MIN_INTERVAL: Duration = Duration::from_millis(1100);
+// Max retries on 429. The in-process gate handles our own pacing; retry covers cross-process
+// contention (another binary using the same key) and transient server-side bucket drain.
+const MAX_429_RETRIES: u32 = 5;
+// Backoff schedule for 429 retries: 1.2s, 2.4s, 4.8s, 9.6s, 19.2s. Doubles each retry up to
+// MAX_429_RETRIES. The first wait is roughly one full bucket window, then we widen exponentially
+// so a burst from another caller naturally clears.
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(1200);
 
 #[derive(Debug, Clone)]
 pub struct DexToolsClient {
@@ -92,6 +99,54 @@ impl DexToolsClient {
         }
         *last = Some(Instant::now());
     }
+
+    /// GET with in-process gating + 429 retry. On 429 we honor `Retry-After` (in seconds) if
+    /// present, otherwise fall back to exponential backoff. Any other 4xx/5xx propagates as
+    /// `DiscoveryError::Http` immediately.
+    async fn fetch_with_retry(&self, url: &str) -> Result<String, DiscoveryError> {
+        let mut attempt: u32 = 0;
+        loop {
+            self.gate().await;
+            let resp = self
+                .http
+                .get(url)
+                .header("X-API-Key", &self.api_key)
+                .header("accept", "application/json")
+                .send()
+                .await?;
+            let status = resp.status();
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_429_RETRIES {
+                // Prefer server-supplied Retry-After (seconds). Fall back to exponential backoff.
+                let retry_after = resp
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .map(Duration::from_secs);
+                let backoff = retry_after.unwrap_or_else(|| RETRY_BASE_DELAY * (1u32 << attempt));
+                warn!(
+                    target: "dextools",
+                    url,
+                    attempt = attempt + 1,
+                    backoff_ms = backoff.as_millis() as u64,
+                    "429 Too Many Requests — backing off"
+                );
+                // Drop the response (consumes the body) before sleeping so the connection
+                // returns to the pool.
+                drop(resp);
+                tokio::time::sleep(backoff).await;
+                // Reset the gate timestamp so the next call waits a full interval, not just the
+                // remainder.
+                {
+                    let mut last = self.last_request.lock().await;
+                    *last = Some(Instant::now());
+                }
+                attempt += 1;
+                continue;
+            }
+            return Ok(resp.error_for_status()?.text().await?);
+        }
+    }
 }
 
 #[async_trait]
@@ -112,17 +167,7 @@ impl TokenPoolIndex for DexToolsClient {
                 "{}/v2/token/{}/{}/pools?sort=creationTime&order=desc&from={}&to={}&page={}&pageSize={}",
                 self.base_url, chain, token, DEFAULT_FROM, DEFAULT_TO, page, PAGE_SIZE,
             );
-            self.gate().await;
-            let body = self
-                .http
-                .get(&url)
-                .header("X-API-Key", &self.api_key)
-                .header("accept", "application/json")
-                .send()
-                .await?
-                .error_for_status()?
-                .text()
-                .await?;
+            let body = self.fetch_with_retry(&url).await?;
             let parsed: schema::PoolsResponse = serde_json::from_str(&body).map_err(|e| {
                 DiscoveryError::Malformed(format!(
                     "DexTools response parse failed: {e}; body preview: {}",
