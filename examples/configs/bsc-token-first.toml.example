@@ -88,9 +88,18 @@ factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
 # https://thegraph.com/explorer (search "uniswap v4 bsc") and substitute the
 # subgraph ID below.
 #
+# The gateway accepts the API key two ways. Both work with this client:
+#   (a) Header  — preferred. Use the cleaner URL with no key in the path:
+#         "https://gateway.thegraph.com/api/subgraphs/id/<SUBGRAPH_ID>"
+#       The client sends `Authorization: Bearer <api_key>` on every request.
+#   (b) Path    — old-style URL with `{API_KEY}` placeholder:
+#         "https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/<SUBGRAPH_ID>"
+#       The placeholder is substituted at SubgraphClient construction.
+# Pick (a) — key doesn't leak into URL logs / proxies / referer headers.
+#
 # When this section is absent, V4 pools missing PoolKey fields are dropped with
 # a warn (see `discovery::enrich_uniswap_v4_via_subgraph`).
 #
 # [subgraph]
 # api_key = "REPLACE_ME"
-# uniswap_v4 = "https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/REPLACE_SUBGRAPH_ID"
+# uniswap_v4 = "https://gateway.thegraph.com/api/subgraphs/id/REPLACE_SUBGRAPH_ID"

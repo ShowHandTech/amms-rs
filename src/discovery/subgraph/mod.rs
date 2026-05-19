@@ -32,6 +32,11 @@ use serde::Deserialize;
 #[derive(Debug, Clone)]
 pub struct SubgraphClient {
     url: String,
+    /// Sent as `Authorization: Bearer {api_key}` on every request. The Graph gateway accepts
+    /// the key either in the URL path (`/api/{API_KEY}/subgraphs/id/{ID}`) or in this header
+    /// (`/api/subgraphs/id/{ID}` + Bearer). Sending the header always is safe — the gateway
+    /// ignores duplicate auth, and it works for both URL styles.
+    api_key: String,
     http: reqwest::Client,
 }
 
@@ -45,13 +50,17 @@ pub struct UniswapV4PoolKey {
 }
 
 impl SubgraphClient {
-    /// `url_template` should contain the literal `{API_KEY}` placeholder, e.g.
-    /// `"https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/<SUBGRAPH_ID>"`. The placeholder
-    /// is replaced with `api_key` once at construction so subsequent requests don't need to
-    /// handle keying logic.
+    /// `url_template` may contain the literal `{API_KEY}` placeholder for the old path-style
+    /// gateway URL (`https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/<ID>`), or it may
+    /// be the new header-style URL with the key omitted
+    /// (`https://gateway.thegraph.com/api/subgraphs/id/<ID>`). Both work: the placeholder is
+    /// substituted if present, and `Authorization: Bearer {api_key}` is sent on every request
+    /// regardless. The header form is preferred (key doesn't leak into URL logs / proxies /
+    /// referer).
     pub fn new(url_template: impl AsRef<str>, api_key: &str) -> Self {
         Self {
             url: url_template.as_ref().replace("{API_KEY}", api_key),
+            api_key: api_key.to_string(),
             http: reqwest::Client::new(),
         }
     }
@@ -88,6 +97,7 @@ impl SubgraphClient {
             .http
             .post(&self.url)
             .header("content-type", "application/json")
+            .bearer_auth(&self.api_key)
             .json(&body)
             .send()
             .await?
