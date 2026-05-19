@@ -8,7 +8,7 @@
 //! This module is dependency-free at runtime — `TokenPoolIndex` impls live in submodules
 //! (`dextools/`) so future indexes (e.g. The Graph) can be added without touching callers.
 
-use crate::amms::amm::AMM;
+use crate::amms::amm::{AutomatedMarketMaker, AMM};
 use crate::amms::error::AMMError;
 use crate::amms::factory::Factory;
 use alloy::eips::BlockId;
@@ -222,8 +222,27 @@ where
             .iter()
             .find(|f| f.address() == factory_addr)
             .ok_or(DiscoveryError::NoMatchingFactory(factory_addr))?;
-        let s = factory.sync(amms, block, provider.clone()).await?;
-        synced.extend(s);
+        let ids: Vec<String> = amms.iter().map(|a| format!("{:?}", a.id())).collect();
+        tracing::info!(
+            target: "discovery",
+            factory = %factory_addr,
+            count = amms.len(),
+            pools = ?ids,
+            "syncing batch"
+        );
+        match factory.sync(amms, block, provider.clone()).await {
+            Ok(s) => synced.extend(s),
+            Err(e) => {
+                tracing::warn!(
+                    target: "discovery",
+                    factory = %factory_addr,
+                    error = %e,
+                    pools = ?ids,
+                    "batch sync failed — these pools were in the failing batch"
+                );
+                return Err(DiscoveryError::AMMError(e));
+            }
+        }
     }
     Ok(synced)
 }

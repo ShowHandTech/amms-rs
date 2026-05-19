@@ -136,13 +136,23 @@ impl TokenPoolIndex for DexToolsClient {
             let mut page_dropped = 0;
             for raw in parsed.data.results {
                 let dex_name = raw.exchange.name.clone();
+                let raw_address = raw.address.clone();
                 match to_pool_descriptor(raw) {
-                    Ok(d) => out.push(d),
+                    Ok(d) => {
+                        debug!(
+                            target: "dextools",
+                            exchange = %dex_name,
+                            address = %raw_address,
+                            "keep pool"
+                        );
+                        out.push(d);
+                    }
                     Err(e) => {
                         page_dropped += 1;
                         debug!(
                             target: "dextools",
                             exchange = %dex_name,
+                            address = %raw_address,
                             error = %e,
                             "drop pool"
                         );
