@@ -16,6 +16,16 @@ rpc_ws = "wss://bsc-rpc.publicnode.com"
 # DexTools chain slug (see https://docs.dextools.io/openapi/api-documentation).
 chain_slug = "bsc"
 
+# Logging. `level` is a `tracing_subscriber::EnvFilter` directive string —
+# same syntax as the RUST_LOG env var, but read from config so each deployment
+# can pick its own verbosity without shell exports.
+#   "info"                                — show all info-level logs
+#   "warn,runner=info"                    — only runner is chatty
+#   "info,state_space::sync=debug"        — see every Swap / ModifyLiquidity sync
+#   "debug,hyper=warn,reqwest=warn"       — full debug, mute HTTP client noise
+[log]
+level = "info,state_space::sync=info,redis_bridge=info,hyper=warn,reqwest=warn"
+
 [dextools]
 # DexTools API key — billed monthly. Used for /v2/token/{chain}/{addr}/pools.
 api_key = "REPLACE_ME"

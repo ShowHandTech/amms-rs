@@ -186,8 +186,10 @@ where
                 info!(target: "redis_bridge", %token, "TRACK");
                 match on_track(token).await {
                     Ok(pools) => {
+                        let pool_count = pools.len();
                         let amm_ids: Vec<_> = pools.iter().map(|a| a.id()).collect();
                         state.write().await.track_pools(pools, token);
+                        info!(target: "redis_bridge", %token, pools = pool_count, "tracked");
                         if let Ok(payload) = serde_json::to_string(&amm_ids) {
                             if let Err(e) =
                                 write_pool_cache(&mut cmd_conn, &keys, token, &payload).await

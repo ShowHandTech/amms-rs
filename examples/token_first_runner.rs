@@ -49,6 +49,8 @@ struct Config {
     rpc: String,
     rpc_ws: String,
     chain_slug: String,
+    #[serde(default)]
+    log: LogSection,
     dextools: DexToolsSection,
     redis: RedisSection,
     core_tokens: CoreTokensSection,
@@ -60,6 +62,24 @@ struct Config {
     pancake_v3: Option<V3Section>,
     #[serde(default)]
     uniswap_v4: Option<UniswapV4Section>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LogSection {
+    #[serde(default = "default_log_level")]
+    level: String,
+}
+
+impl Default for LogSection {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+        }
+    }
+}
+
+fn default_log_level() -> String {
+    "info,state_space::sync=info,redis_bridge=info,hyper=warn,reqwest=warn".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,8 +154,6 @@ fn parse_hook_filter(s: &str) -> eyre::Result<HookFilter> {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    tracing_subscriber::fmt::init();
-
     let path: PathBuf = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "examples/configs/bsc-token-first.toml".to_string())
@@ -149,7 +167,11 @@ async fn main() -> eyre::Result<()> {
     })?;
     let cfg: Config = toml::from_str(&raw)?;
 
-    info!(target: "runner", config = %path.display(), "starting token-first runner");
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(&cfg.log.level))
+        .init();
+
+    info!(target: "runner", config = %path.display(), log_level = %cfg.log.level, "starting token-first runner");
 
     let http_provider = ProviderBuilder::new().connect(&cfg.rpc).await?;
     let ws_provider = ProviderBuilder::new()
