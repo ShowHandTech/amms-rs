@@ -222,34 +222,75 @@ where
             .iter()
             .find(|f| f.address() == factory_addr)
             .ok_or(DiscoveryError::NoMatchingFactory(factory_addr))?;
-        let ids: Vec<String> = amms.iter().map(|a| format!("{:?}", a.id())).collect();
         tracing::info!(
             target: "discovery",
             factory = %factory_addr,
             count = amms.len(),
-            pools = ?ids,
             "syncing batch"
         );
-        match factory.sync(amms, block, provider.clone()).await {
-            Ok(s) => synced.extend(s),
+        let ok = sync_with_bisect(factory, amms, block, provider.clone()).await;
+        synced.extend(ok);
+    }
+    Ok(synced)
+}
+
+/// Sync a factory's batch with per-pool isolation.
+///
+/// Deployless batch contracts (`deploy_builder(...).call_raw()`) staticcall each pool in the
+/// constructor; any single revert makes the *entire* batch return `0x` with no data. To avoid
+/// dropping 30 good pools because of 1 bad one, we bisect on failure: split the batch in half,
+/// retry each half, recurse until a single-pool batch fails — only that one gets logged and
+/// dropped. Worst case is O(N) extra RPCs when every pool is bad; typical case (1 bad pool in N)
+/// is O(log N) extra RPCs.
+async fn sync_with_bisect<N, P>(
+    factory: &Factory,
+    amms: Vec<AMM>,
+    block: BlockId,
+    provider: P,
+) -> Vec<AMM>
+where
+    N: Network,
+    P: Provider<N> + Clone,
+{
+    let factory_addr = factory.address();
+    let mut out: Vec<AMM> = Vec::new();
+    // LIFO stack of sub-batches still to try. Pushed in reverse so we sync left-to-right.
+    let mut stack: Vec<Vec<AMM>> = vec![amms];
+    while let Some(batch) = stack.pop() {
+        if batch.is_empty() {
+            continue;
+        }
+        let ids: Vec<String> = batch.iter().map(|a| format!("{:?}", a.id())).collect();
+        match factory.sync(batch.clone(), block, provider.clone()).await {
+            Ok(s) => out.extend(s),
             Err(e) => {
-                // Don't fail the whole token: a single bad pool in one batch (e.g. an address
-                // that no longer has code, or a DexTools-mis-classified pool that reverts
-                // slot0()) shouldn't drop the other 30+ pools across the other factories that
-                // are perfectly fine. Skip this entire factory's pools and continue.
-                // TODO: per-pool fallback inside Factory::sync would let us drop only the one
-                // bad pool instead of the whole batch.
-                tracing::warn!(
-                    target: "discovery",
-                    factory = %factory_addr,
-                    error = %e,
-                    pools = ?ids,
-                    "batch sync failed — dropping these pools, continuing with other factories"
-                );
+                if batch.len() == 1 {
+                    tracing::warn!(
+                        target: "discovery",
+                        factory = %factory_addr,
+                        pool = ?ids[0],
+                        error = %e,
+                        "pool sync failed — dropping single pool"
+                    );
+                } else {
+                    let mid = batch.len() / 2;
+                    let mut left = batch;
+                    let right = left.split_off(mid);
+                    tracing::debug!(
+                        target: "discovery",
+                        factory = %factory_addr,
+                        count = left.len() + right.len(),
+                        error = %e,
+                        "batch sync failed — bisecting"
+                    );
+                    // Push right first so left is popped (and synced) first.
+                    stack.push(right);
+                    stack.push(left);
+                }
             }
         }
     }
-    Ok(synced)
+    out
 }
 
 fn matches_amm_variant(factory: &Factory, amm: &AMM) -> bool {
