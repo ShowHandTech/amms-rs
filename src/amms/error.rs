@@ -38,6 +38,8 @@ pub enum AMMError {
     IncompatibleDescriptor,
     #[error("Pool descriptor singleton {got} does not match factory {expected}")]
     DescriptorSingletonMismatch { got: Address, expected: Address },
+    #[error("Pool descriptor missing required PoolKey field '{0}' — enrichment step skipped or failed")]
+    DescriptorMissingPoolKeyField(&'static str),
 }
 
 #[derive(Error, Debug)]

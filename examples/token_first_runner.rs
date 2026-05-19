@@ -32,7 +32,11 @@ use amms::{
         uniswap_v3::UniswapV3Factory,
         uniswap_v4::HookFilter,
     },
-    discovery::{dextools::DexToolsClient, discover_and_sync_for_token},
+    discovery::{
+        dextools::DexToolsClient, discover_and_sync_for_token_with_subgraph,
+        subgraph::SubgraphClient,
+    },
+
     redis_bridge::{
         fetch_active_tokens, run_subscriber, write_pool_cache, RedisKeys,
     },
@@ -62,6 +66,19 @@ struct Config {
     pancake_v3: Option<V3Section>,
     #[serde(default)]
     uniswap_v4: Option<UniswapV4Section>,
+    #[serde(default)]
+    subgraph: Option<SubgraphSection>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubgraphSection {
+    /// The Graph API key (free tier at https://thegraph.com/studio). Stored separately so the
+    /// URL template can be checked into git without leaking credentials.
+    api_key: String,
+    /// URL template with `{API_KEY}` placeholder. Example:
+    /// `"https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/<ID>"`.
+    #[serde(default)]
+    uniswap_v4: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,6 +238,16 @@ async fn main() -> eyre::Result<()> {
 
     // === Bootstrap: pull active tokens, run DexTools discovery for each. ===
     let dextools = DexToolsClient::new(cfg.dextools.api_key.clone());
+    let subgraph_v4 = cfg.subgraph.as_ref().and_then(|s| {
+        s.uniswap_v4
+            .as_ref()
+            .map(|url| SubgraphClient::new(url, &s.api_key))
+    });
+    if subgraph_v4.is_some() {
+        info!(target: "runner", "Uniswap V4 subgraph enrichment enabled");
+    } else {
+        info!(target: "runner", "no subgraph configured — Uniswap V4 pools without resolved PoolKey will be dropped");
+    }
     let active_tokens = fetch_active_tokens(&mut redis_conn, &redis_keys).await?;
     info!(target: "runner", count = active_tokens.len(), "fetched active tokens from redis");
 
@@ -228,10 +255,11 @@ async fn main() -> eyre::Result<()> {
     state.set_core_tokens(cfg.core_tokens.addresses.iter().copied());
 
     for token in &active_tokens {
-        match discover_and_sync_for_token(
+        match discover_and_sync_for_token_with_subgraph(
             &cfg.chain_slug,
             *token,
             &dextools,
+            subgraph_v4.as_ref(),
             &factories,
             BlockId::latest(),
             http_provider.clone(),
@@ -281,17 +309,20 @@ async fn main() -> eyre::Result<()> {
     let sub_url = cfg.redis.url.clone();
     let sub_namespace = cfg.redis.namespace.clone();
     let sub_dextools = dextools.clone();
+    let sub_subgraph = subgraph_v4.clone();
     tokio::spawn(async move {
         let on_track = |token: Address| {
             let chain = sub_chain.clone();
             let dextools = sub_dextools.clone();
+            let subgraph = sub_subgraph.clone();
             let factories = sub_factories.clone();
             let provider = sub_provider.clone();
             async move {
-                discover_and_sync_for_token(
+                discover_and_sync_for_token_with_subgraph(
                     &chain,
                     token,
                     &dextools,
+                    subgraph.as_ref(),
                     &factories,
                     BlockId::latest(),
                     provider,

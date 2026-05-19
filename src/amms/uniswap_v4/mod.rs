@@ -1046,20 +1046,33 @@ impl UniswapV4Factory {
                         expected: self.pool_manager,
                     });
                 }
+                // All PoolKey fields must be resolved by the caller before reaching here.
+                // For DexTools-sourced descriptors, that is `enrich_uniswap_v4_via_subgraph`.
+                // For Initialize-log auto-track, the factory parses them out of the log itself.
+                let currency0 = currency0.ok_or(AMMError::DescriptorMissingPoolKeyField(
+                    "currency0",
+                ))?;
+                let currency1 = currency1.ok_or(AMMError::DescriptorMissingPoolKeyField(
+                    "currency1",
+                ))?;
+                let fee = fee.ok_or(AMMError::DescriptorMissingPoolKeyField("fee"))?;
+                let tick_spacing = tick_spacing
+                    .ok_or(AMMError::DescriptorMissingPoolKeyField("tick_spacing"))?;
+                let hooks = hooks.ok_or(AMMError::DescriptorMissingPoolKeyField("hooks"))?;
                 Ok(AMM::UniswapV4Pool(UniswapV4Pool {
                     pool_id: *pool_id,
                     pool_manager: *pool_manager,
-                    currency0: *currency0,
+                    currency0,
                     currency0_decimals: 0,
-                    currency1: *currency1,
+                    currency1,
                     currency1_decimals: 0,
-                    hooks: *hooks,
+                    hooks,
                     state: V4CLState {
                         liquidity: 0,
                         sqrt_price: U256::ZERO,
                         tick: 0,
-                        fee: *fee,
-                        tick_spacing: *tick_spacing,
+                        fee,
+                        tick_spacing,
                         tick_bitmap: HashMap::new(),
                         ticks: HashMap::new(),
                     },

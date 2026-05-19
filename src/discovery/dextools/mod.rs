@@ -16,7 +16,7 @@
 //!   - "uniswap" + "v4"       → currently dropped (DexTools omits hooks/fee/tickSpacing)
 
 use super::{DiscoveryError, PoolDescriptor, TokenPoolIndex};
-use alloy::primitives::Address;
+use alloy::primitives::{Address, B256};
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
@@ -185,10 +185,41 @@ fn to_pool_descriptor(raw: schema::Pool) -> Result<PoolDescriptor, DiscoveryErro
     }
 
     // Uniswap V4 (must be matched before generic "v4"/"pancake" branches but after Infinity).
+    //
+    // DexTools returns `address` (=PoolId), `exchange.factory` (=PoolManager), `fee` as percentage,
+    // `mainToken`/`sideToken` — but **not** `tickSpacing` and **not** `hooks`. Emit a partial
+    // descriptor with the fields we have; `enrich_uniswap_v4_via_subgraph` will fill the rest
+    // before any factory tries to use it.
     if dex.contains("uniswap") && dex.contains("v4") {
-        return Err(DiscoveryError::Malformed(
-            "Uniswap V4: DexTools omits hooks/tickSpacing — needs subgraph fallback or per-pool detail endpoint".to_string(),
-        ));
+        let pool_id = parse_b256(&raw.address)?;
+        let pool_manager = factory_addr;
+        // Tokens come back as `mainToken` (the token DexTools considers "main") and `sideToken`.
+        // V4 PoolKey requires `currency0 < currency1` byte ordering, so sort them ourselves.
+        let (currency0, currency1) = match sort_token_pair(&raw.main_token, &raw.side_token) {
+            Ok(pair) => (Some(pair.0), Some(pair.1)),
+            Err(_) => (None, None),
+        };
+        // DexTools `fee` is a percentage float (e.g. `1.99` = 1.99%). V4 PoolKey fee is in pips
+        // (1e6 = 100%). Convert: pct * 10000. Round to nearest integer to absorb FP noise.
+        let fee = raw
+            .fee
+            .map(|pct| (pct * 10_000.0).round() as i64)
+            .and_then(|v| {
+                if (0..=1_000_000).contains(&v) {
+                    Some(v as u32)
+                } else {
+                    None
+                }
+            });
+        return Ok(PoolDescriptor::UniswapV4 {
+            pool_id,
+            pool_manager,
+            currency0,
+            currency1,
+            fee,
+            tick_spacing: None,
+            hooks: None,
+        });
     }
 
     // V3.
@@ -229,3 +260,30 @@ fn to_pool_descriptor(raw: schema::Pool) -> Result<PoolDescriptor, DiscoveryErro
     )))
 }
 
+fn sort_token_pair(
+    a: &Option<schema::TokenRef>,
+    b: &Option<schema::TokenRef>,
+) -> Result<(Address, Address), DiscoveryError> {
+    let a_addr: Address = a
+        .as_ref()
+        .ok_or(DiscoveryError::MissingField("mainToken"))?
+        .address
+        .parse()
+        .map_err(|e| DiscoveryError::Malformed(format!("bad mainToken: {e}")))?;
+    let b_addr: Address = b
+        .as_ref()
+        .ok_or(DiscoveryError::MissingField("sideToken"))?
+        .address
+        .parse()
+        .map_err(|e| DiscoveryError::Malformed(format!("bad sideToken: {e}")))?;
+    if a_addr < b_addr {
+        Ok((a_addr, b_addr))
+    } else {
+        Ok((b_addr, a_addr))
+    }
+}
+
+fn parse_b256(s: &str) -> Result<B256, DiscoveryError> {
+    s.parse::<B256>()
+        .map_err(|e| DiscoveryError::Malformed(format!("bad bytes32 {s}: {e}")))
+}

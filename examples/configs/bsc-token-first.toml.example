@@ -76,3 +76,21 @@ factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
 # [uniswap_v4]
 # pool_manager = "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df"
 # hook_filter = "none"
+
+# Subgraph (The Graph) — enrichment source for Uniswap V4 PoolKey fields that
+# DexTools doesn't return (tickSpacing, hooks). The V4 PoolManager has no
+# `getPoolKey(id)` getter, so PoolKey can only come from the Initialize event
+# log or an off-chain index. On BSC full nodes (~3-day log retention) the event
+# path is dead, so subgraph is the only option.
+#
+# Register a free API key at https://thegraph.com/studio/ (100K queries/month
+# free). Then find the Uniswap V4 subgraph for your chain at
+# https://thegraph.com/explorer (search "uniswap v4 bsc") and substitute the
+# subgraph ID below.
+#
+# When this section is absent, V4 pools missing PoolKey fields are dropped with
+# a warn (see `discovery::enrich_uniswap_v4_via_subgraph`).
+#
+# [subgraph]
+# api_key = "REPLACE_ME"
+# uniswap_v4 = "https://gateway.thegraph.com/api/{API_KEY}/subgraphs/id/REPLACE_SUBGRAPH_ID"
