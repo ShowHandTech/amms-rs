@@ -36,9 +36,14 @@ const PAGE_HARD_LIMIT: u32 = 200;
 // `{"message":"Invalid pageSize, must be less or equal to 50", ...}` 400).
 // Higher-tier plans may allow more; bump only after confirming with your key.
 const PAGE_SIZE: u32 = 50;
-// Trial tier limit is 1 req/s. Add a small buffer so clock skew between local Instant and the
-// server's bucket counter doesn't make us bounce off 429s. Override via `with_min_interval`.
-const DEFAULT_MIN_INTERVAL: Duration = Duration::from_millis(1100);
+// Trial tier limit is nominally 1 req/s. Empirically the server window is stricter than 1.0s of
+// wall-clock spacing: at 1100ms a token's page=0 → page=1 still bounces 429 (observed 2026-05-19,
+// fresh key, single token, sequential pages: page=0 OK then page=1 429 at exactly 1.16s
+// send-to-429). debug_dextools_429.rs got 6/6 OK at 1000ms only because it started cold with a
+// full bucket; in steady state the bucket is half-drained and sub-1.5s spacing bounces. 1500ms
+// gives enough headroom that the 429-retry path is a safety net rather than the steady state.
+// Override via `with_min_interval` if you have a paid tier with a higher limit.
+const DEFAULT_MIN_INTERVAL: Duration = Duration::from_millis(1500);
 // Max retries on 429. The in-process gate handles our own pacing; retry covers cross-process
 // contention (another binary using the same key) and transient server-side bucket drain.
 const MAX_429_RETRIES: u32 = 5;
