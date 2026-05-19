@@ -20,5 +20,8 @@ contracts/src/flattened/
 # Temp checkpoint
 *.temp-checkpoint.json
 
-# intellij 
+# intellij
 *.idea/
+
+# Local runtime config (copy from *.toml.example, fill in api keys / urls)
+examples/configs/*.toml

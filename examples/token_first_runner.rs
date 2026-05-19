@@ -58,6 +58,16 @@ struct Config {
     pancake_v2: Option<V2Section>,
     #[serde(default)]
     pancake_v3: Option<V3Section>,
+    #[serde(default)]
+    uniswap_v4: Option<UniswapV4Section>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UniswapV4Section {
+    pool_manager: Address,
+    creation_block: u64,
+    #[serde(default = "default_hook_filter")]
+    hook_filter: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,7 +133,13 @@ async fn main() -> eyre::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "examples/configs/bsc-token-first.toml".to_string())
         .into();
-    let raw = fs::read_to_string(&path)?;
+    let raw = fs::read_to_string(&path).map_err(|e| {
+        eyre::eyre!(
+            "failed to read {}: {e}. Copy from {}.example and fill in api keys / urls.",
+            path.display(),
+            path.display()
+        )
+    })?;
     let cfg: Config = toml::from_str(&raw)?;
 
     info!(target: "runner", config = %path.display(), "starting token-first runner");
@@ -154,6 +170,15 @@ async fn main() -> eyre::Result<()> {
             creation_block: v4.creation_block,
             hook_filter: parse_hook_filter(&v4.hook_filter)?,
         }));
+    }
+    if let Some(v4) = cfg.uniswap_v4 {
+        factories.push(Factory::UniswapV4Factory(
+            amms::amms::uniswap_v4::UniswapV4Factory {
+                pool_manager: v4.pool_manager,
+                creation_block: v4.creation_block,
+                hook_filter: parse_hook_filter(&v4.hook_filter)?,
+            },
+        ));
     }
     if factories.is_empty() {
         eyre::bail!("no factories configured");

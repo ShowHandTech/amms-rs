@@ -107,7 +107,13 @@ async fn main() -> eyre::Result<()> {
     let api_key = std::env::var("DEXTOOLS_API_KEY")
         .map_err(|_| eyre::eyre!("DEXTOOLS_API_KEY env var required"))?;
 
-    let raw = fs::read_to_string(&config_path)?;
+    let raw = fs::read_to_string(&config_path).map_err(|e| {
+        eyre::eyre!(
+            "failed to read {}: {e}. Copy from {}.example and fill in api keys / urls.",
+            config_path.display(),
+            config_path.display()
+        )
+    })?;
     let cfg: Config = toml::from_str(&raw)?;
 
     println!("config:    {}", config_path.display());
