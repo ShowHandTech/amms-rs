@@ -29,3 +29,22 @@ examples/configs/*.toml
 # Python
 __pycache__/
 *.pyc
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Editor / IDE (per-user)
+.vscode/
+.zed/
+
+# Claude Code project state
+.claude/
+
+# Runtime artifacts
+*.log
+nohup.out
+core
+*.core
