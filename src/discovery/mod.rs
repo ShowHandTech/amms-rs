@@ -233,14 +233,19 @@ where
         match factory.sync(amms, block, provider.clone()).await {
             Ok(s) => synced.extend(s),
             Err(e) => {
+                // Don't fail the whole token: a single bad pool in one batch (e.g. an address
+                // that no longer has code, or a DexTools-mis-classified pool that reverts
+                // slot0()) shouldn't drop the other 30+ pools across the other factories that
+                // are perfectly fine. Skip this entire factory's pools and continue.
+                // TODO: per-pool fallback inside Factory::sync would let us drop only the one
+                // bad pool instead of the whole batch.
                 tracing::warn!(
                     target: "discovery",
                     factory = %factory_addr,
                     error = %e,
                     pools = ?ids,
-                    "batch sync failed — these pools were in the failing batch"
+                    "batch sync failed — dropping these pools, continuing with other factories"
                 );
-                return Err(DiscoveryError::AMMError(e));
             }
         }
     }
