@@ -1,0 +1,29 @@
+# Build-acceleration knobs. Linux-only — macOS / Windows fall back to defaults.
+#
+# Install once on a fresh Linux box:
+#   sudo apt install mold clang        # Ubuntu 22.04+ / Debian 12+
+# or build mold from source:
+#   https://github.com/rui314/mold
+#
+# Why mold: the dominant cost in `cargo build --release` on this repo is the
+# final link step (you saw it as the long pause at "Building 422/423"). The
+# system `ld` is single-threaded; mold is parallel + I/O-pipelined and is
+# typically 5–10× faster on a workspace this size.
+#
+# `-C target-cpu=native` is safe for personal dev machines (uses every ISA
+# extension the CPU supports). Do NOT enable for CI artifacts that ship to
+# other hosts — the resulting binary will SIGILL on older microarchitectures.
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "target-cpu=native",
+]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "clang"
+rustflags = [
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "target-cpu=native",
+]
