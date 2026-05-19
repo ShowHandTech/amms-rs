@@ -65,6 +65,7 @@ struct Config {
 #[derive(Debug, Deserialize)]
 struct UniswapV4Section {
     pool_manager: Address,
+    #[serde(default)]
     creation_block: u64,
     #[serde(default = "default_hook_filter")]
     hook_filter: String,
@@ -86,9 +87,13 @@ struct CoreTokensSection {
     addresses: Vec<Address>,
 }
 
+// `creation_block` is required on the Factory struct itself (for factory-first historical
+// scan), but token-first mode never reads it. We default it to 0 so the config file can
+// stay focused on the things that actually matter at runtime (api keys, rpc, addresses).
 #[derive(Debug, Deserialize)]
 struct PancakeV4ClSection {
     cl_pool_manager: Address,
+    #[serde(default)]
     creation_block: u64,
     #[serde(default = "default_hook_filter")]
     hook_filter: String,
@@ -97,6 +102,7 @@ struct PancakeV4ClSection {
 #[derive(Debug, Deserialize)]
 struct V2Section {
     factory: Address,
+    #[serde(default)]
     creation_block: u64,
     fee: usize,
 }
@@ -104,6 +110,7 @@ struct V2Section {
 #[derive(Debug, Deserialize)]
 struct V3Section {
     factory: Address,
+    #[serde(default)]
     creation_block: u64,
 }
 

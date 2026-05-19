@@ -51,6 +51,7 @@ struct Config {
 #[derive(Debug, Deserialize)]
 struct PancakeV4ClSection {
     cl_pool_manager: Address,
+    #[serde(default)]
     creation_block: u64,
     #[serde(default = "default_hook_filter")]
     hook_filter: String,
@@ -59,6 +60,7 @@ struct PancakeV4ClSection {
 #[derive(Debug, Deserialize)]
 struct V2Section {
     factory: Address,
+    #[serde(default)]
     creation_block: u64,
     fee: usize,
 }
@@ -66,6 +68,7 @@ struct V2Section {
 #[derive(Debug, Deserialize)]
 struct V3Section {
     factory: Address,
+    #[serde(default)]
     creation_block: u64,
 }
 

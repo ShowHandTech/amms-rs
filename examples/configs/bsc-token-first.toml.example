@@ -48,10 +48,6 @@ addresses = [
 # tagged `PcsV4Cl` can be turned into unsynced AMMs.
 [pancake_v4_cl]
 cl_pool_manager = "0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b"
-# creation_block isn't used in token-first mode (no historical scan) but the
-# factory struct still needs it. Use the actual deploy block so any code path
-# that does fall back to historical scan works correctly.
-creation_block = 47214308
 # "none" = drop hooked pools; "all" = include; "0xAaa...,0xBbb..." = whitelist.
 hook_filter = "none"
 
@@ -59,21 +55,14 @@ hook_filter = "none"
 # UniswapV3, just different factory addresses.
 [pancake_v2]
 factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
-creation_block = 6809737
 fee = 250  # 25 bps; (100000 - 250) / 100000 multiplier
 
 [pancake_v3]
 factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
-creation_block = 26956207
 
-# Uniswap V4 PoolManager on BSC. Library is fully wired (UniswapV4Factory +
-# from_descriptor), but the on-chain PoolManager address on BSC is not
-# committed to this file because (a) Uniswap V4 BSC liquidity is small relative
-# to PancakeSwap V4 CL, and (b) the address should be verified on-chain before
-# running. Look up the canonical deployment on https://docs.uniswap.org/contracts/v4/deployments
-# and fill in pool_manager + creation_block, then uncomment.
+# Uniswap V4 PoolManager on BSC. Library is fully wired; uncomment when you
+# verify the PoolManager address on-chain (https://docs.uniswap.org/contracts/v4/deployments).
 #
 # [uniswap_v4]
-# pool_manager = "0x000000000000000000000000000000000000dEaD"   # REPLACE
-# creation_block = 0                                            # REPLACE
+# pool_manager = "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df"
 # hook_filter = "none"
