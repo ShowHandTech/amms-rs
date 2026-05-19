@@ -61,22 +61,16 @@ cl_pool_manager = "0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b"
 # "none" = drop hooked pools; "all" = include; "0xAaa...,0xBbb..." = whitelist.
 hook_filter = "none"
 
-# V2 fork factories. One [[v2]] block per fork. `fee` is in the fork's own
-# unit: (100000 - fee) / 100000 multiplier (PCS = 250 → 0.25%; UniV2 = 300 →
-# 0.30%). DexTools returns V2 pools from every fork the token trades on, so
-# add every fork you care about — pools from unconfigured factories are
-# dropped (see `discovery::descriptors_to_amms`).
-[[v2]]
+# PancakeSwap V2. Same fee semantics as upstream UniswapV2, just different
+# factory address.
+[pancake_v2]
 factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
-fee = 250  # PancakeSwap V2
+fee = 250  # 25 bps; (100000 - 250) / 100000 multiplier
 
-# Example: uncomment to also index BiSwap V2.
-# [[v2]]
-# factory = "0x858E3312ed3A876947EA49d572A7C42DE08af7EE"
-# fee = 100  # BiSwap V2 (0.10%)
-
-# V3 fork factories. Fee and tick_spacing are per-pool from chain, so each
-# entry only needs the factory address.
+# V3 forks. BSC has both PancakeSwap V3 and Uniswap V3 deployed; add one
+# [[v3]] block per fork. Fee + tick_spacing are per-pool from chain so each
+# entry only needs the factory address. Pools from V3 factories not listed
+# here are dropped at discovery time (see `discovery::descriptors_to_amms`).
 [[v3]]
 factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"  # PancakeSwap V3
 

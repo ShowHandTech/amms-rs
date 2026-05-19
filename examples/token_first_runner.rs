@@ -60,18 +60,13 @@ struct Config {
     core_tokens: CoreTokensSection,
     #[serde(default)]
     pancake_v4_cl: Option<PancakeV4ClSection>,
-    /// V2 forks. Each (factory, fee) pair, fee in the fork's own unit (PCS=250, UniV2=300).
-    /// Renamed from `pancake_v2` to a list so multiple forks coexist; if neither this nor the
-    /// legacy `pancake_v2` is set, no V2 factory is registered.
-    #[serde(default)]
-    v2: Vec<V2Section>,
-    /// Deprecated singular form. Still accepted for back-compat; merged into `v2`.
     #[serde(default)]
     pancake_v2: Option<V2Section>,
-    /// V3 forks. Just factory addresses — fee + tick_spacing are per-pool from chain.
+    /// V3 forks. BSC has PancakeSwap V3 + Uniswap V3 + others; one [[v3]] block per fork.
+    /// (Fee and tick_spacing are per-pool from chain so each entry only needs the factory.)
     #[serde(default)]
     v3: Vec<V3Section>,
-    /// Deprecated singular form. Still accepted for back-compat; merged into `v3`.
+    /// Legacy singular form. Still accepted for back-compat; merged into `v3` on startup.
     #[serde(default)]
     pancake_v3: Option<V3Section>,
     #[serde(default)]
@@ -205,18 +200,18 @@ async fn main() -> eyre::Result<()> {
         .connect_ws(WsConnect::new(cfg.rpc_ws.clone()))
         .await?;
 
-    // Build factories from config. Legacy singular `[pancake_v2]` / `[pancake_v3]` is folded
-    // into the same list as `[[v2]]` / `[[v3]]` so old configs keep working.
+    // Build factories from config.
     let mut factories: Vec<Factory> = Vec::new();
-    let v2_sections: Vec<V2Section> = cfg.pancake_v2.into_iter().chain(cfg.v2).collect();
-    let v3_sections: Vec<V3Section> = cfg.pancake_v3.into_iter().chain(cfg.v3).collect();
-    for v2 in v2_sections {
+    if let Some(v2) = cfg.pancake_v2 {
         factories.push(Factory::UniswapV2Factory(UniswapV2Factory::new(
             v2.factory,
             v2.fee,
             v2.creation_block,
         )));
     }
+    // V3: legacy singular `[pancake_v3]` is folded into the same list as `[[v3]]` so configs
+    // that already use the singular form keep working when you add a second V3 fork.
+    let v3_sections: Vec<V3Section> = cfg.pancake_v3.into_iter().chain(cfg.v3).collect();
     for v3 in v3_sections {
         factories.push(Factory::UniswapV3Factory(UniswapV3Factory::new(
             v3.factory,
