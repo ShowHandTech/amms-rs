@@ -32,8 +32,10 @@ const DEFAULT_FROM: &str = "2020-01-01T00:00:00.000Z";
 const DEFAULT_TO: &str = "2030-01-01T00:00:00.000Z";
 const PAGE_HARD_LIMIT: u32 = 200;
 // Page size. DexTools v2 default is 20; passing pageSize cuts request count.
-// 100 is the documented trial-tier upper bound; bump only if your tier confirms higher.
-const PAGE_SIZE: u32 = 100;
+// Trial tier caps this at 50 (verified 2026-05-19: pageSize=100 returns
+// `{"message":"Invalid pageSize, must be less or equal to 50", ...}` 400).
+// Higher-tier plans may allow more; bump only after confirming with your key.
+const PAGE_SIZE: u32 = 50;
 // Trial tier limit is 1 req/s. Add a small buffer so clock skew between local Instant and the
 // server's bucket counter doesn't make us bounce off 429s. Override via `with_min_interval`.
 const DEFAULT_MIN_INTERVAL: Duration = Duration::from_millis(1100);
