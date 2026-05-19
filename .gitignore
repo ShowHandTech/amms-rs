@@ -25,3 +25,7 @@ contracts/src/flattened/
 
 # Local runtime config (copy from *.toml.example, fill in api keys / urls)
 examples/configs/*.toml
+
+# Python
+__pycache__/
+*.pyc
