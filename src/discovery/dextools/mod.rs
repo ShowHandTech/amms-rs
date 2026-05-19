@@ -140,10 +140,11 @@ impl DexToolsClient {
                 let backoff = retry_after.unwrap_or_else(|| RETRY_BASE_DELAY * (1u32 << attempt));
                 warn!(
                     target: "dextools",
-                    url,
+                    failed_url = url,
                     attempt = attempt + 1,
+                    max_attempts = MAX_429_RETRIES,
                     backoff_ms = backoff.as_millis() as u64,
-                    "429 Too Many Requests — backing off"
+                    "GET returned 429 — sleeping then retrying the same URL"
                 );
                 // Drop the response (consumes the body) before sleeping so the connection
                 // returns to the pool.
