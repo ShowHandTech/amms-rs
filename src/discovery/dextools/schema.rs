@@ -1,53 +1,62 @@
 //! DexTools v2 JSON response DTOs.
 //!
-//! Permissive on purpose — extra/unknown fields are ignored, and most fields are `Option<_>`
-//! because schemas vary by chain and exchange. The mapping from DTO to `PoolDescriptor`
-//! happens in `super::to_pool_descriptor`.
+//! Schema reverse-engineered from real `/v2/token/{chain}/{addr}/pools` responses
+//! (verified 2026-05-19, BSC). Top level is `{ statusCode, data: PoolsData }` where
+//! `data` contains pagination metadata + a `results: [Pool]` array. Most pool fields
+//! are `Option<_>` because DexTools varies them by exchange version.
 
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PoolsResponse {
     #[serde(default)]
-    pub data: Vec<Pool>,
+    pub data: PoolsData,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PoolsData {
+    #[serde(default)]
+    pub page: u32,
+    #[serde(default, alias = "pageSize")]
+    pub page_size: u32,
+    #[serde(default, alias = "totalPages")]
+    pub total_pages: u32,
+    #[serde(default)]
+    pub results: Vec<Pool>,
+}
+
+/// One pool entry from DexTools.
+///
+/// Note `address` semantics depend on `exchange.name`:
+///   - V2 / V3 pools: contract address (Address, 20 bytes hex)
+///   - PCS Infinity / Uniswap V4: PoolId (B256, 32 bytes hex)
+#[derive(Debug, Clone, Deserialize)]
+pub struct Pool {
+    pub address: String,
+    pub exchange: ExchangeInfo,
+    /// PCS Infinity / V4 only — returned as percentage float (e.g. `0.0804` = 0.0804%).
+    /// V2/V3 omit this field; V2 fee is hard-coded per factory, V3 fee is read from chain.
+    #[serde(default)]
+    pub fee: Option<f64>,
+    /// DexTools picks `mainToken` by liquidity / popularity, **not** V4 currency0/currency1
+    /// ordering. Callers that need V4-style ordering must sort by address themselves.
+    #[serde(default, alias = "mainToken")]
+    pub main_token: Option<TokenRef>,
+    #[serde(default, alias = "sideToken")]
+    pub side_token: Option<TokenRef>,
+    #[serde(default, alias = "liquidityUsd")]
+    pub liquidity_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct Pool {
-    /// Pool contract address (V2/V3) or PoolId (V4). DexTools returns it under various keys
-    /// across versions; we accept `address` first and fall back to `id`.
-    #[serde(alias = "id", alias = "poolAddress", alias = "pool_address")]
-    pub address: String,
-
-    /// Pool factory contract address (V2/V3) or singleton manager (V4 PoolManager / PCS
-    /// CLPoolManager).
+pub struct ExchangeInfo {
+    #[serde(default)]
+    pub name: String,
     #[serde(default)]
     pub factory: Option<String>,
+}
 
-    /// Human-readable DEX identifier (e.g. `"PancakeSwapV3"`, `"UniswapV4"`,
-    /// `"PancakeSwap Infinity CL"`). We classify on this string.
-    #[serde(default, alias = "dex", alias = "exchangeName")]
-    pub exchange: Option<String>,
-
-    /// Pool fee in 1/100000 units for V2 forks (e.g. `25` = 0.025%, `300` = 0.30%). Per-pool
-    /// V3 fee is read from chain at sync time so we don't need it here.
-    #[serde(default, alias = "feeBps", alias = "fee_bps")]
-    pub fee_bps: Option<usize>,
-
-    /// V4-specific fields. Provided by DexTools for V4 pools; absent for V2/V3.
-    #[serde(default, alias = "token0", alias = "currency_0")]
-    pub currency0: Option<String>,
-    #[serde(default, alias = "token1", alias = "currency_1")]
-    pub currency1: Option<String>,
-    #[serde(default)]
-    pub hooks: Option<String>,
-    /// PCS-only: 32-byte packed parameters word (tickSpacing + hook permission bitmap).
-    #[serde(default)]
-    pub parameters: Option<String>,
-    /// Uniswap V4: explicit fee (24-bit) and tickSpacing (int24). Renamed to avoid clashing
-    /// with `fee_bps` above; PCS embeds tickSpacing inside `parameters` so it doesn't use these.
-    #[serde(default, alias = "v4Fee", alias = "uniV4Fee")]
-    pub v4_fee: Option<u32>,
-    #[serde(default, alias = "v4TickSpacing", alias = "uniV4TickSpacing", alias = "tickSpacing")]
-    pub v4_tick_spacing: Option<i32>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenRef {
+    pub address: String,
 }

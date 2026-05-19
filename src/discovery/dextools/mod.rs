@@ -1,23 +1,32 @@
 //! DexTools v2 API client.
 //!
-//! Endpoint shape (best-effort; the exact response schema may need adjustment once real samples
-//! land — see plan Open Item #1):
+//! Verified endpoint (2026-05-19):
 //!
 //!   GET https://public-api.dextools.io/trial/v2/token/{chain}/{address}/pools
-//!     Headers: X-API-Key: <key>
+//!     ?sort=creationTime&order=desc&from=<ISO>&to=<ISO>&page=<n>
+//!   Headers: X-API-Key: <key>
 //!
-//! `chain` is DexTools' chain slug (e.g. `"bsc"`, `"ether"`, `"polygon"`).
+//! The endpoint **requires** `sort`, `order`, `from`, `to` (will 400 otherwise) and is
+//! paginated. `pools_for_token` walks all pages until `page >= total_pages`.
 //!
-//! The current parser is permissive: missing fields degrade gracefully (e.g. unknown DEX
-//! variants are skipped, V4 pools without PoolKey fields are emitted with `Option::None`).
+//! Classification is by `exchange.name` substring (case-insensitive):
+//!   - "infinity"             → PCS V4 CL  (hooks/parameters not in response → see TODO)
+//!   - "v3"                   → V3 (factory from `exchange.factory`, fee from chain at sync)
+//!   - "v2" or just "pancake" → V2 (factory from `exchange.factory`, fee hard-coded per fork)
+//!   - "uniswap" + "v4"       → currently dropped (DexTools omits hooks/fee/tickSpacing)
 
 use super::{DiscoveryError, PoolDescriptor, TokenPoolIndex};
-use alloy::primitives::{Address, B256};
+use alloy::primitives::Address;
 use async_trait::async_trait;
+use tracing::{debug, info, warn};
 
 pub mod schema;
 
 const DEFAULT_BASE_URL: &str = "https://public-api.dextools.io/trial";
+// DexTools 400s if from/to are missing. Use a fixed wide window so all pools are returned.
+const DEFAULT_FROM: &str = "2020-01-01T00:00:00.000Z";
+const DEFAULT_TO: &str = "2030-01-01T00:00:00.000Z";
+const PAGE_HARD_LIMIT: u32 = 200;
 
 #[derive(Debug, Clone)]
 pub struct DexToolsClient {
@@ -53,145 +62,165 @@ impl TokenPoolIndex for DexToolsClient {
         chain: &str,
         token: Address,
     ) -> Result<Vec<PoolDescriptor>, DiscoveryError> {
-        let url = format!(
-            "{}/v2/token/{}/{}/pools",
-            self.base_url,
-            chain,
-            // DexTools accepts checksummed hex; alloy's Display gives 0x-prefixed lower-case
-            // which DexTools also accepts.
-            token
+        let mut out = Vec::new();
+        let mut page: u32 = 0;
+        let mut total_pages: u32 = 1;
+        let mut total_raw: usize = 0;
+        let mut total_dropped: usize = 0;
+
+        while page < total_pages && page < PAGE_HARD_LIMIT {
+            let url = format!(
+                "{}/v2/token/{}/{}/pools?sort=creationTime&order=desc&from={}&to={}&page={}",
+                self.base_url, chain, token, DEFAULT_FROM, DEFAULT_TO, page,
+            );
+            let body = self
+                .http
+                .get(&url)
+                .header("X-API-Key", &self.api_key)
+                .header("accept", "application/json")
+                .send()
+                .await?
+                .error_for_status()?
+                .text()
+                .await?;
+            let parsed: schema::PoolsResponse = serde_json::from_str(&body).map_err(|e| {
+                DiscoveryError::Malformed(format!(
+                    "DexTools response parse failed: {e}; body preview: {}",
+                    truncate(&body, 400)
+                ))
+            })?;
+
+            total_pages = parsed.data.total_pages.max(1);
+            let page_raw = parsed.data.results.len();
+            total_raw += page_raw;
+            let mut page_dropped = 0;
+            for raw in parsed.data.results {
+                let dex_name = raw.exchange.name.clone();
+                match to_pool_descriptor(raw) {
+                    Ok(d) => out.push(d),
+                    Err(e) => {
+                        page_dropped += 1;
+                        debug!(
+                            target: "dextools",
+                            exchange = %dex_name,
+                            error = %e,
+                            "drop pool"
+                        );
+                    }
+                }
+            }
+            total_dropped += page_dropped;
+            debug!(
+                target: "dextools",
+                %token,
+                page,
+                total_pages,
+                page_raw,
+                page_kept = page_raw - page_dropped,
+                page_dropped,
+                "page processed"
+            );
+            page += 1;
+        }
+
+        info!(
+            target: "dextools",
+            %token,
+            pages = page,
+            total_pages,
+            raw = total_raw,
+            kept = out.len(),
+            dropped = total_dropped,
+            "discovery complete"
         );
-        let resp = self
-            .http
-            .get(&url)
-            .header("X-API-Key", &self.api_key)
-            .header("accept", "application/json")
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
-        let parsed: schema::PoolsResponse = serde_json::from_str(&resp)?;
-        Ok(parsed
-            .data
-            .into_iter()
-            .filter_map(|raw| to_pool_descriptor(raw).ok())
-            .collect())
+        if page == PAGE_HARD_LIMIT && page < total_pages {
+            warn!(
+                target: "dextools",
+                %token,
+                fetched_pages = page,
+                total_pages,
+                "hit PAGE_HARD_LIMIT; remaining pages skipped"
+            );
+        }
+        Ok(out)
     }
 }
 
-/// Map a single DexTools pool record to our internal `PoolDescriptor`. Unknown DEX variants
-/// return `Err(Malformed)` so the caller can filter them out.
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…(+{})", &s[..max], s.len() - max)
+    }
+}
+
+/// Map a single DexTools pool record to our internal `PoolDescriptor`.
 fn to_pool_descriptor(raw: schema::Pool) -> Result<PoolDescriptor, DiscoveryError> {
-    let dex = raw.exchange.as_deref().unwrap_or("").to_lowercase();
-    let factory_addr = raw
+    let dex = raw.exchange.name.to_lowercase();
+    let factory_str = raw
+        .exchange
         .factory
         .as_deref()
-        .map(|s| s.parse::<Address>())
-        .transpose()
-        .map_err(|e| DiscoveryError::Malformed(format!("bad factory address: {e}")))?;
+        .ok_or(DiscoveryError::MissingField("exchange.factory"))?;
+    let factory_addr: Address = factory_str
+        .parse()
+        .map_err(|e| DiscoveryError::Malformed(format!("bad factory {factory_str}: {e}")))?;
 
-    // V2-family classification: factory address present + exchange name matches a known V2 fork.
-    if dex.contains("v2")
-        || dex.contains("pancakeswap")
-            && !dex.contains("v3")
-            && !dex.contains("v4")
-            && !dex.contains("infinity")
-    {
-        let address = raw
-            .address
-            .parse::<Address>()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad pool address: {e}")))?;
-        let factory = factory_addr.ok_or(DiscoveryError::MissingField("factory"))?;
-        let fee = raw.fee_bps.unwrap_or(25); // PCS V2 default 25 bps; UniV2 = 30
-        return Ok(PoolDescriptor::V2 {
-            address,
-            factory,
-            fee,
-        });
-    }
-
-    // V3-family.
-    if dex.contains("v3") {
-        let address = raw
-            .address
-            .parse::<Address>()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad pool address: {e}")))?;
-        let factory = factory_addr.ok_or(DiscoveryError::MissingField("factory"))?;
-        return Ok(PoolDescriptor::V3 { address, factory });
-    }
+    // Order matters: "infinity" before generic "v2/v3", and "v3" before "v2" (since "v3" name
+    // does not contain "v2" but "pancakeswap v3" would match the bare "pancakeswap" V2 branch).
 
     // PCS V4 Infinity CL.
-    if dex.contains("pancake") && (dex.contains("infinity") || dex.contains("v4")) {
-        let pool_id = parse_b256(&raw.address)?;
-        let cl_pool_manager = factory_addr.ok_or(DiscoveryError::MissingField("factory"))?;
-        let currency0 = raw
-            .currency0
-            .as_deref()
-            .map(|s| s.parse::<Address>())
-            .transpose()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad currency0: {e}")))?;
-        let currency1 = raw
-            .currency1
-            .as_deref()
-            .map(|s| s.parse::<Address>())
-            .transpose()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad currency1: {e}")))?;
-        let hooks = raw
-            .hooks
-            .as_deref()
-            .map(|s| s.parse::<Address>())
-            .transpose()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad hooks: {e}")))?;
-        let parameters = raw
-            .parameters
-            .as_deref()
-            .map(parse_b256)
-            .transpose()?;
-        return Ok(PoolDescriptor::PcsV4Cl {
-            pool_id,
-            cl_pool_manager,
-            currency0,
-            currency1,
-            hooks,
-            parameters,
+    //
+    // Currently dropped from the token-first path: DexTools omits `hooks` and `parameters`
+    // (which encodes `tick_spacing`), and inserting an Infinity pool without `tick_spacing`
+    // makes the downstream tickBitmap batch read query the wrong slots. The cleanest fix is
+    // a chain lookup via `CLPoolManager.poolIdToPoolKey(bytes32)` — TODO once that batch is
+    // written. Until then PCS V4 Infinity pools only enter the StateSpace via the
+    // factory-first `discover()` path (which is unavailable on short-retention BSC nodes).
+    if dex.contains("infinity") {
+        return Err(DiscoveryError::Malformed(
+            "PCS V4 Infinity: hooks/parameters missing — needs poolIdToPoolKey chain lookup"
+                .to_string(),
+        ));
+    }
+
+    // Uniswap V4 (must be matched before generic "v4"/"pancake" branches but after Infinity).
+    if dex.contains("uniswap") && dex.contains("v4") {
+        return Err(DiscoveryError::Malformed(
+            "Uniswap V4: DexTools omits hooks/tickSpacing — needs subgraph fallback or per-pool detail endpoint".to_string(),
+        ));
+    }
+
+    // V3.
+    if dex.contains("v3") {
+        let address: Address = raw
+            .address
+            .parse()
+            .map_err(|e| DiscoveryError::Malformed(format!("bad pool address: {e}")))?;
+        return Ok(PoolDescriptor::V3 {
+            address,
+            factory: factory_addr,
         });
     }
 
-    // Uniswap V4.
-    if dex.contains("uniswap") && dex.contains("v4") {
-        let pool_id = parse_b256(&raw.address)?;
-        let pool_manager = factory_addr.ok_or(DiscoveryError::MissingField("factory"))?;
-        let currency0 = raw
-            .currency0
-            .as_deref()
-            .ok_or(DiscoveryError::MissingField("currency0"))?
-            .parse::<Address>()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad currency0: {e}")))?;
-        let currency1 = raw
-            .currency1
-            .as_deref()
-            .ok_or(DiscoveryError::MissingField("currency1"))?
-            .parse::<Address>()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad currency1: {e}")))?;
-        let fee = raw.v4_fee.ok_or(DiscoveryError::MissingField("v4_fee"))?;
-        let tick_spacing = raw
-            .v4_tick_spacing
-            .ok_or(DiscoveryError::MissingField("v4_tick_spacing"))?;
-        let hooks = raw
-            .hooks
-            .as_deref()
-            .unwrap_or("0x0000000000000000000000000000000000000000")
-            .parse::<Address>()
-            .map_err(|e| DiscoveryError::Malformed(format!("bad hooks: {e}")))?;
-        return Ok(PoolDescriptor::UniswapV4 {
-            pool_id,
-            pool_manager,
-            currency0,
-            currency1,
+    // V2 family. Match either explicit "v2" or any pancake variant without v3/v4/infinity markers.
+    let is_v2 = dex.contains("v2")
+        || (dex.contains("pancakeswap")
+            && !dex.contains("v3")
+            && !dex.contains("v4")
+            && !dex.contains("infinity"));
+    if is_v2 {
+        let address: Address = raw
+            .address
+            .parse()
+            .map_err(|e| DiscoveryError::Malformed(format!("bad pool address: {e}")))?;
+        // PCS V2 = 25 (0.25%); UniV2 / SushiV2 = 30. On BSC PCS dominates; default to 25 when
+        // we can't tell. The runner can override per-pool by registering the right factory.
+        let fee = if dex.contains("pancake") { 25 } else { 30 };
+        return Ok(PoolDescriptor::V2 {
+            address,
+            factory: factory_addr,
             fee,
-            tick_spacing,
-            hooks,
         });
     }
 
@@ -200,7 +229,3 @@ fn to_pool_descriptor(raw: schema::Pool) -> Result<PoolDescriptor, DiscoveryErro
     )))
 }
 
-fn parse_b256(s: &str) -> Result<B256, DiscoveryError> {
-    s.parse::<B256>()
-        .map_err(|e| DiscoveryError::Malformed(format!("bad bytes32 {s}: {e}")))
-}
