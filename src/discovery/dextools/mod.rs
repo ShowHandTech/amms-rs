@@ -18,6 +18,10 @@
 use super::{DiscoveryError, PoolDescriptor, TokenPoolIndex};
 use alloy::primitives::{Address, B256};
 use async_trait::async_trait;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 pub mod schema;
@@ -27,12 +31,24 @@ const DEFAULT_BASE_URL: &str = "https://public-api.dextools.io/trial";
 const DEFAULT_FROM: &str = "2020-01-01T00:00:00.000Z";
 const DEFAULT_TO: &str = "2030-01-01T00:00:00.000Z";
 const PAGE_HARD_LIMIT: u32 = 200;
+// Page size. DexTools v2 default is 20; passing pageSize cuts request count.
+// 100 is the documented trial-tier upper bound; bump only if your tier confirms higher.
+const PAGE_SIZE: u32 = 100;
+// Trial tier limit is 1 req/s. Add a small buffer so clock skew between local Instant and the
+// server's bucket counter doesn't make us bounce off 429s. Override via `with_min_interval`.
+const DEFAULT_MIN_INTERVAL: Duration = Duration::from_millis(1100);
 
 #[derive(Debug, Clone)]
 pub struct DexToolsClient {
     base_url: String,
     api_key: String,
     http: reqwest::Client,
+    /// Minimum spacing between two outgoing requests. Enforced by `gate()` below.
+    min_interval: Duration,
+    /// Last successful (or attempted) request timestamp. Wrapped in `Arc<Mutex<_>>` so every
+    /// clone of the client serializes against the same gate — important because the runner clones
+    /// `DexToolsClient` into the bootstrap loop *and* into the Redis-subscriber spawn.
+    last_request: Arc<Mutex<Option<Instant>>>,
 }
 
 impl DexToolsClient {
@@ -41,6 +57,8 @@ impl DexToolsClient {
             base_url: DEFAULT_BASE_URL.to_string(),
             api_key: api_key.into(),
             http: reqwest::Client::new(),
+            min_interval: DEFAULT_MIN_INTERVAL,
+            last_request: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -52,6 +70,25 @@ impl DexToolsClient {
     pub fn with_client(mut self, http: reqwest::Client) -> Self {
         self.http = http;
         self
+    }
+
+    /// Override the per-request spacing. Default is 1100ms (trial tier + buffer).
+    pub fn with_min_interval(mut self, interval: Duration) -> Self {
+        self.min_interval = interval;
+        self
+    }
+
+    /// Block until at least `min_interval` has passed since the previous request, then bump the
+    /// timestamp. Lock is held across the sleep so concurrent callers queue rather than racing.
+    async fn gate(&self) {
+        let mut last = self.last_request.lock().await;
+        if let Some(prev) = *last {
+            let elapsed = prev.elapsed();
+            if elapsed < self.min_interval {
+                tokio::time::sleep(self.min_interval - elapsed).await;
+            }
+        }
+        *last = Some(Instant::now());
     }
 }
 
@@ -70,9 +107,10 @@ impl TokenPoolIndex for DexToolsClient {
 
         while page < total_pages && page < PAGE_HARD_LIMIT {
             let url = format!(
-                "{}/v2/token/{}/{}/pools?sort=creationTime&order=desc&from={}&to={}&page={}",
-                self.base_url, chain, token, DEFAULT_FROM, DEFAULT_TO, page,
+                "{}/v2/token/{}/{}/pools?sort=creationTime&order=desc&from={}&to={}&page={}&pageSize={}",
+                self.base_url, chain, token, DEFAULT_FROM, DEFAULT_TO, page, PAGE_SIZE,
             );
+            self.gate().await;
             let body = self
                 .http
                 .get(&url)
