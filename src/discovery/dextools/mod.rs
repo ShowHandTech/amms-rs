@@ -62,10 +62,24 @@ pub struct DexToolsClient {
 
 impl DexToolsClient {
     pub fn new(api_key: impl Into<String>) -> Self {
+        // DexTools sits behind Cloudflare and flags requests with a bot-y User-Agent (e.g. the
+        // reqwest default "reqwest/0.x.y") for the `__cf_bm` challenge — observed as 429 on the
+        // very first request even with a fresh API key. We do three things to pass:
+        //   1. Send a non-bot User-Agent (a clear, recognizable client identifier; not pretending
+        //      to be a browser).
+        //   2. Enable cookie_store so the `__cf_bm` challenge cookie set by Cloudflare on the
+        //      first response is sent back automatically on subsequent requests — without this
+        //      every request looks like a fresh client and gets re-challenged.
+        //   3. Enable gzip/brotli + a real Accept-* set, matching what a normal HTTP client sends.
+        let http = reqwest::Client::builder()
+            .user_agent(concat!("amms-rs/", env!("CARGO_PKG_VERSION")))
+            .cookie_store(true)
+            .build()
+            .expect("default reqwest client should always build");
         Self {
             base_url: DEFAULT_BASE_URL.to_string(),
             api_key: api_key.into(),
-            http: reqwest::Client::new(),
+            http,
             min_interval: DEFAULT_MIN_INTERVAL,
             last_request: Arc::new(Mutex::new(None)),
         }

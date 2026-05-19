@@ -46,7 +46,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Phase 5+: token-first discovery + Redis bridge
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies", "gzip", "brotli"] }
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
 
 
