@@ -62,13 +62,10 @@ struct Config {
     pancake_v4_cl: Option<PancakeV4ClSection>,
     #[serde(default)]
     pancake_v2: Option<V2Section>,
-    /// V3 forks. BSC has PancakeSwap V3 + Uniswap V3 + others; one [[v3]] block per fork.
-    /// (Fee and tick_spacing are per-pool from chain so each entry only needs the factory.)
-    #[serde(default)]
-    v3: Vec<V3Section>,
-    /// Legacy singular form. Still accepted for back-compat; merged into `v3` on startup.
     #[serde(default)]
     pancake_v3: Option<V3Section>,
+    #[serde(default)]
+    uniswap_v3: Option<V3Section>,
     #[serde(default)]
     uniswap_v4: Option<UniswapV4Section>,
     #[serde(default)]
@@ -209,10 +206,13 @@ async fn main() -> eyre::Result<()> {
             v2.creation_block,
         )));
     }
-    // V3: legacy singular `[pancake_v3]` is folded into the same list as `[[v3]]` so configs
-    // that already use the singular form keep working when you add a second V3 fork.
-    let v3_sections: Vec<V3Section> = cfg.pancake_v3.into_iter().chain(cfg.v3).collect();
-    for v3 in v3_sections {
+    if let Some(v3) = cfg.pancake_v3 {
+        factories.push(Factory::UniswapV3Factory(UniswapV3Factory::new(
+            v3.factory,
+            v3.creation_block,
+        )));
+    }
+    if let Some(v3) = cfg.uniswap_v3 {
         factories.push(Factory::UniswapV3Factory(UniswapV3Factory::new(
             v3.factory,
             v3.creation_block,
