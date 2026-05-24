@@ -1,0 +1,56 @@
+# MEV binary config for BSC. Drives `mev/src/main.rs`.
+#
+# Phase 10: the runtime is identical to `examples/configs/bsc-token-first.toml`
+# — same StateSpace bootstrap, same Redis bridge, same mirror layer. The
+# difference is that this binary will grow mempool subscription + decoder +
+# speculator + pathfinder + profit log in Phase 11–14. MEV-specific sections
+# (mempool endpoints, profit thresholds, router decoders) will be added below
+# as those phases land; none are required yet.
+
+rpc = "https://bsc-rpc.publicnode.com"
+rpc_ws = "wss://bsc-rpc.publicnode.com"
+chain_slug = "bsc"
+
+[dextools]
+api_key = "REPLACE_ME"
+
+[redis]
+url = "redis://127.0.0.1:6379/"
+namespace = "bsc"
+
+[core_tokens]
+addresses = [
+  "0x55d398326f99059fF775485246999027B3197955",  # USDT (BSC)
+  "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",  # USDC (BSC)
+  "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",  # WBNB
+  "0x8d0D000Ee44948FC98c9B98A4FA4921476f08B0d",  # USD1
+]
+
+[pancake_v4_cl]
+cl_pool_manager = "0xa0FfB9c1CE1Fe56963B0321B32E7A0302114058b"
+hook_filter = "none"
+
+[pancake_v2]
+factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+fee = 250
+
+[pancake_v3]
+factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+
+[uniswap_v4]
+pool_manager = "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df"
+hook_filter = "none"
+
+# PCS V3 SmartRouter on BSC. When set, the mempool decoder registers a handler for
+# `exactInputSingle` against this address. Comment out to disable V3-router decoding.
+pcs_v3_smart_router = "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"
+
+[mev]
+# Estimated total gas for buy + sell + executor overhead. Phase F will replace this with
+# eth_estimateGas against the real executor contract; v1 just uses a constant for the log.
+gas_estimate = 250_000
+# Base fee in wei (1 gwei = 1_000_000_000). BSC's typical floor.
+base_fee_wei = 1_000_000_000
+# Minimum gross profit (in `token_out` units, raw integer) before promoting the log to info.
+# Below this, opportunities still get computed but only show at debug level.
+min_profit = 0

@@ -1,0 +1,42 @@
+[package]
+name = "mev"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "mev"
+path = "src/main.rs"
+
+[dependencies]
+amms = { path = ".." }
+
+# alloy — match versions used by amms so the AMM types interoperate
+alloy = { version = "1.0.25", features = [
+  "contract",
+  "network",
+  "rpc",
+  "rpc-types",
+  "provider-ws",
+  "rpc-types-eth",
+  "signer-local",
+] }
+
+# async runtime
+tokio = { version = "1.42", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# logs + errors
+eyre = "0.6"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# config + serde
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# redis bridge (token-first bootstrap shares amms's redis bridge + mirror layer)
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
