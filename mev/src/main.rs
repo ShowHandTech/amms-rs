@@ -243,16 +243,48 @@ async fn main() -> eyre::Result<()> {
         pcs_v3::register_all(&mut registry, v3_router);
     }
     let registry = Arc::new(registry);
+    let resolved_mev = cfg.mev.resolve()?;
+    info!(
+        target: "mev",
+        gas_estimate = resolved_mev.gas_estimate,
+        base_fee_wei = %resolved_mev.base_fee_wei,
+        min_profit_units = resolved_mev.min_profit,
+        "mev settings resolved",
+    );
     let gas_ctx = profit::GasContext {
-        gas_estimate: cfg.mev.gas_estimate,
-        base_fee_wei: cfg.mev.base_fee_wei,
+        gas_estimate: resolved_mev.gas_estimate,
+        base_fee_wei: resolved_mev.base_fee_wei,
     };
     let profit_cfg = profit::ProfitConfig {
-        min_profit: cfg.mev.min_profit,
+        min_profit: resolved_mev.min_profit,
+    };
+
+    // Build pathfinder config once. `bridge_tokens` falls back to core_tokens when the TOML
+    // leaves the list empty — the common case for BSC.
+    let pathfinder_cfg = {
+        use std::collections::HashSet;
+        let mut bridges: HashSet<alloy::primitives::Address> =
+            cfg.mev.pathfinder.bridge_tokens.iter().copied().collect();
+        if bridges.is_empty() {
+            bridges.extend(cfg.core_tokens.addresses.iter().copied());
+        }
+        info!(
+            target: "mev",
+            max_hops = cfg.mev.pathfinder.max_hops,
+            pool_candidates_per_edge = cfg.mev.pathfinder.pool_candidates_per_edge,
+            bridge_token_count = bridges.len(),
+            "pathfinder configured",
+        );
+        Arc::new(pathfinder::PathfinderConfig {
+            max_hops: cfg.mev.pathfinder.max_hops,
+            pool_candidates_per_edge: cfg.mev.pathfinder.pool_candidates_per_edge,
+            bridge_tokens: bridges,
+        })
     };
     {
         let registry = registry.clone();
         let state_for_speculator = manager.state.clone();
+        let pathfinder_cfg = pathfinder_cfg.clone();
         tokio::spawn(async move {
             while let Some(tx) = mempool_rx.recv().await {
                 let Some(intent) = registry.decode(&tx) else {
@@ -293,16 +325,20 @@ async fn main() -> eyre::Result<()> {
                     "projected intent",
                 );
 
-                let opportunities =
-                    pathfinder::find_backruns(&state_for_speculator, &projection).await;
-                for opp in &opportunities {
-                    profit::report_opportunity(&intent, opp, gas_ctx, profit_cfg);
+                let cycles = pathfinder::find_arb_cycles(
+                    &state_for_speculator,
+                    &projection,
+                    &pathfinder_cfg,
+                )
+                .await;
+                for cycle in &cycles {
+                    profit::report_opportunity(&intent, cycle, gas_ctx, profit_cfg);
                 }
-                if opportunities.is_empty() {
+                if cycles.is_empty() {
                     debug!(
                         target: "mev::pathfinder",
                         tx_hash = ?intent.source.tx_hash,
-                        "no backrun candidates",
+                        "no profitable cycles",
                     );
                 }
             }

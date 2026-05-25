@@ -49,8 +49,33 @@ pcs_v3_smart_router = "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"
 # Estimated total gas for buy + sell + executor overhead. Phase F will replace this with
 # eth_estimateGas against the real executor contract; v1 just uses a constant for the log.
 gas_estimate = 250_000
-# Base fee in wei (1 gwei = 1_000_000_000). BSC's typical floor.
-base_fee_wei = 1_000_000_000
-# Minimum gross profit (in `token_out` units, raw integer) before promoting the log to info.
-# Below this, opportunities still get computed but only show at debug level.
-min_profit = 0
+
+# Base fee in gwei. BSC's typical floor is 1.0. Decimal allowed (e.g. "0.5", "1.5").
+base_fee_gwei = 1.0
+
+# Minimum gross profit threshold to promote a backrun opportunity to INFO-level logging.
+# Written as a human-readable decimal in `token_out` units. The decimals scaling is set by
+# `min_profit_decimals` below — BSC's common quote tokens (USDT / USDC / WBNB / BUSD) all
+# use 18 decimals, which is the default. So `"0.01"` here means "0.01 USDT" (or whatever
+# the backrun's token_out happens to be).
+#
+# Below this threshold, opportunities still get computed but only show at debug level.
+# Start at "0" while you calibrate, then raise after watching the live distribution.
+min_profit = "0.01"
+min_profit_decimals = 18
+
+[mev.pathfinder]
+# Max cycle length including the anchor leg (P_after Y→X).
+#   2 = backrun only (find another X↔Y pool)
+#   3 = also enumerate X → bridge_token → Y → P_after triangular arbs
+#   4+ = allowed but cost grows quickly; not recommended without measurement
+max_hops = 3
+
+# Per edge in the cycle, how many candidate pools to consider from the by_token intersection.
+# 1 = deepest pool only (cheap, modal-case correct).
+# 2+ multiplies clone cost; useful if you suspect the deepest pool isn't always the best price.
+pool_candidates_per_edge = 1
+
+# Internal hop whitelist. Empty array = fall back to [core_tokens].addresses.
+# Add addresses here if you want to bridge through tokens that aren't core (e.g. DAI / FRAX).
+bridge_tokens = []
